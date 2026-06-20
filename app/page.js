@@ -1,93 +1,136 @@
 "use client";
 
-import Image from "next/image";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { FaUser, FaLock } from "react-icons/fa";
+import { IoEyeOutline, IoEyeOffOutline } from "react-icons/io5";
 
-export default function Home() {
+export default function LoginPage() {
+  const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
+
+  const handleLogin = () => {
+    router.push("/dashboard");
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div className="min-h-screen flex">
+
+      {/* Left Side */}
+      <div className="w-1/2 bg-black relative overflow-hidden">
+        <img
+          src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085"
+          alt="coffee"
+          className="absolute inset-0 w-full h-full object-cover opacity-40"
+        />
+
+        <div className="absolute top-0 right-0 w-[250px] h-full bg-red-600 rounded-l-full opacity-80"></div>
+
+        <div className="relative z-10 p-16 text-white">
           <div className="flex items-center gap-4">
-            <Image src="/next.svg" alt="logo" width={40} height={16} />
+            <div className="bg-red-600 p-4 rounded-2xl text-3xl">
+              ☕
+            </div>
+
             <div>
-              <div className="text-sm text-slate-600">ระบบบริหารจัดการ</div>
-              <div className="text-lg font-semibold">Retail Beverage Equipment</div>
+              <h2 className="text-xl">ระบบบริหารจัดการ</h2>
+              <h1 className="text-4xl font-bold">
+                ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+              </h1>
             </div>
           </div>
-          <nav className="flex items-center gap-4 text-sm text-slate-600">
-            <a href="#" className="hover:text-slate-900">แดชบอร์ด</a>
-            <a href="#" className="hover:text-slate-900">สินค้า</a>
-            <a href="#" className="hover:text-slate-900">ลูกค้า</a>
-            <a href="#" className="hover:text-slate-900">การขาย</a>
-          </nav>
+
+          <div className="w-16 h-1 bg-red-500 mt-10 mb-6"></div>
+
+          <p className="text-lg leading-8">
+            จัดการร้านค้าได้อย่างมีประสิทธิภาพ
+            <br />
+            ควบคุมสต๊อกสินค้า ยอดขาย ลูกค้า
+            <br />
+            และรายงานในระบบเดียว
+          </p>
         </div>
-      </header>
+      </div>
 
-      <main className="max-w-6xl mx-auto px-6 py-10">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-semibold">สวัสดี, ผู้ดูแลระบบ</h1>
-            <p className="text-sm text-slate-500">ภาพรวมระบบและสถิติของร้านคุณ</p>
+      {/* Right Side */}
+      <div className="w-1/2 bg-gray-100 flex items-center justify-center">
+        <div className="bg-white w-[500px] p-10 rounded-3xl shadow-xl">
+
+          <div className="text-center">
+            <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-5 p-4">
+              <img
+                src="https://cdn-icons-png.flaticon.com/128/8639/8639414.png"
+                alt="Login"
+                className="w-full h-full object-contain"
+              />
+            </div>
+
+            <h1 className="text-4xl font-bold">เข้าสู่ระบบ</h1>
+
+            <p className="text-gray-500 mt-2">
+              กรุณาเข้าสู่ระบบเพื่อใช้งาน
+            </p>
           </div>
-          <div className="flex items-center gap-4">
-            <button className="px-4 py-2 bg-blue-600 text-white rounded-md">สร้างรายการใหม่</button>
-            <button className="px-3 py-2 border rounded-md">นำออก</button>
+
+          {/* Username */}
+          <div className="mt-8 relative">
+            <FaUser className="absolute left-4 top-4 text-gray-400" />
+
+            <input
+              type="text"
+              placeholder="Username"
+              className="w-full border rounded-xl pl-12 py-4 outline-none focus:border-red-500"
+            />
           </div>
+
+          {/* Password */}
+          <div className="mt-4 relative">
+            <FaLock className="absolute left-4 top-4 text-gray-400" />
+
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="Password"
+              className="w-full border rounded-xl pl-12 pr-12 py-4 outline-none focus:border-red-500"
+            />
+
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-4 top-4 text-gray-400 text-xl"
+            >
+              {showPassword ? <IoEyeOffOutline /> : <IoEyeOutline />}
+            </button>
+          </div>
+
+          <div className="flex justify-between mt-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" />
+              Remember me
+            </label>
+
+            <button className="text-red-600">
+              Forgot password?
+            </button>
+          </div>
+
+          <button
+            onClick={handleLogin}
+            className="
+              w-full
+              bg-red-600
+              hover:bg-red-700
+              text-white
+              py-4
+              rounded-xl
+              mt-6
+              font-semibold
+            "
+          >
+            Login
+          </button>
+
         </div>
-
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-slate-500">ยอดขายวันนี้</div>
-            <div className="text-2xl font-semibold">฿12,340</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-slate-500">สต็อกสินค้า</div>
-            <div className="text-2xl font-semibold">1,254 รายการ</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-slate-500">ลูกค้าใหม่</div>
-            <div className="text-2xl font-semibold">34</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg shadow-sm">
-            <div className="text-sm text-slate-500">คำสั่งซื้อรอชำระ</div>
-            <div className="text-2xl font-semibold">7</div>
-          </div>
-        </section>
-
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white p-4 rounded-lg shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-semibold">รายการสินค้า</h2>
-              <a href="#" className="text-sm text-blue-600">ดูทั้งหมด</a>
-            </div>
-
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="flex items-center gap-4 p-3 border rounded-md">
-                  <div className="w-16 h-16 bg-slate-100 rounded-md flex items-center justify-center">📦</div>
-                  <div className="flex-1">
-                    <div className="font-medium">เครื่องปั่นกาแฟ รุ่น A{i}</div>
-                    <div className="text-sm text-slate-500">สต็อก: {50 * i} ชิ้น</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm text-slate-500">ราคา</div>
-                    <div className="font-semibold">฿{(2500 * i).toLocaleString()}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <aside className="bg-white p-4 rounded-lg shadow-sm">
-            <h3 className="font-semibold mb-3">กิจกรรมล่าสุด</h3>
-            <ul className="text-sm text-slate-600 space-y-2">
-              <li>สั่งซื้อ #1023 ถูกยืนยัน</li>
-              <li>สต็อกสินค้า "กาแฟบด" เหลือน้อย</li>
-              <li>ลูกค้าใหม่: คุณสมชาย</li>
-            </ul>
-          </aside>
-        </section>
-      </main>
+      </div>
     </div>
   );
 }
