@@ -109,7 +109,7 @@ export default function CategoriesPage() {
             </h1>
 
             <p className="text-gray-400 mt-3 text-xl">
-              Dashboard &gt; หมวดหมู่สินค้า
+              Categories &gt; หมวดหมู่สินค้า
             </p>
           </div>
 

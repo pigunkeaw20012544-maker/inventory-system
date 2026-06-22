@@ -49,7 +49,7 @@ export default function ReportsPage() {
       <main className="flex-1 p-10">
         <div className="mb-8">
           <h1 className="text-5xl font-bold text-gray-900">รายงาน</h1>
-          <p className="text-gray-400 text-xl mt-3">Dashboard &gt; รายงาน</p>
+          <p className="text-gray-400 text-xl mt-3">Reports &gt; รายงาน</p>
         </div>
 
         <div className="bg-white rounded-3xl shadow-sm border p-8 mb-6">

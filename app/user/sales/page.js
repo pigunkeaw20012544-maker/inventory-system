@@ -18,11 +18,15 @@ export default function UserSalesPage() {
 
   return (
     <div className="min-h-screen flex bg-gray-50">
-      <aside className="w-72 bg-[#111827] text-white">
+      <aside className="w-72 bg-[#111827] text-white min-h-screen">
         <div className="bg-red-600 p-6 rounded-br-[50px]">
-          <h2 className="font-bold text-lg">
-            ระบบบริหารจัดการ<br />ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
-          </h2>
+          <div className="flex items-center gap-3">
+            <div className="text-3xl">🥤</div>
+            <div>
+              <p className="text-sm">ระบบบริหารจัดการ</p>
+              <h1 className="font-bold">ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</h1>
+            </div>
+          </div>
         </div>
 
         <div className="p-4 space-y-3">
@@ -52,7 +56,7 @@ export default function UserSalesPage() {
         <div className="flex justify-between mb-8">
           <div>
             <h1 className="text-5xl font-bold">การขาย</h1>
-            <p className="text-gray-500 mt-2">หน้าหลัก &gt; การขาย</p>
+            <p className="text-gray-500 mt-2">Sales &gt; การขาย</p>
           </div>
 
           <div className="flex items-center gap-5">

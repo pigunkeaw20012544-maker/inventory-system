@@ -55,7 +55,7 @@ export default function UsersPage() {
         </div>
 
         <p className="text-gray-400 text-xl mb-8">
-          Dashboard &gt; ผู้ใช้งาน
+          Users &gt; ผู้ใช้งาน
         </p>
 
         <div className="bg-white rounded-3xl border shadow-sm p-6 mb-6">
