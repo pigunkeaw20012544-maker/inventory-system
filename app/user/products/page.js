@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { supabase } from "../../lib/supabase";
+import LogoutButton from "../../components/LogoutButton";
 import {
 FaHome,
 FaBox,
@@ -21,58 +23,7 @@ FaPlus,
 FaSave,
 } from "react-icons/fa";
 
-const initialProducts = [
-{
-code: "CUP-22",
-barcode: "8851234567890",
-name: "แก้วพลาสติก 22 oz.",
-category: "แก้ว",
-price: "2.50",
-stock: 150,
-unit: "ชิ้น",
-status: "มีสินค้า",
-},
-{
-code: "BEV-0001",
-barcode: "8851234500012",
-name: "แก้วเชคเกอร์ 750 ml.",
-category: "อุปกรณ์ชงเครื่องดื่ม",
-price: "250.00",
-stock: 42,
-unit: "ชิ้น",
-status: "มีสินค้า",
-},
-{
-code: "BEV-0002",
-barcode: "8851234500029",
-name: "ขวดน้ำพลาสติก 1 ลิตร",
-category: "ภาชนะบรรจุ",
-price: "45.00",
-stock: 38,
-unit: "ชิ้น",
-status: "มีสินค้า",
-},
-{
-code: "BEV-0003",
-barcode: "8851234500036",
-name: "ปั๊มไซรัป 1 cc.",
-category: "อุปกรณ์เสริม",
-price: "180.00",
-stock: 27,
-unit: "ชิ้น",
-status: "มีสินค้า",
-},
-{
-code: "BEV-0005",
-barcode: "8851234500050",
-name: "แก้วตวง 2 oz.",
-category: "อุปกรณ์ชงเครื่องดื่ม",
-price: "60.00",
-stock: 18,
-unit: "ชิ้น",
-status: "ใกล้หมด",
-},
-];
+
 
 const emptyForm = {
 code: "",
@@ -86,7 +37,7 @@ status: "มีสินค้า",
 };
 
 export default function UserProductsPage() {
-const [products, setProducts] = useState(initialProducts);
+const [products, setProducts] = useState([]);
 const [keyword, setKeyword] = useState("");
 const [foundProduct, setFoundProduct] = useState(null);
 
@@ -96,6 +47,46 @@ const [showAddModal, setShowAddModal] = useState(false);
 
 const [formData, setFormData] = useState(emptyForm);
 const [formError, setFormError] = useState("");
+async function loadProducts() {
+const { data, error } = await supabase
+.from("products")
+.select(`       id,
+      product_code,
+      barcode,
+      name,
+      price,
+      stock,
+      unit,
+      status,
+      category:categories(name)
+    `)
+.order("id", { ascending: true });
+
+if (error) {
+console.error("โหลดสินค้าไม่สำเร็จ:", error);
+alert("ไม่สามารถโหลดข้อมูลสินค้าจากฐานข้อมูลได้");
+return;
+}
+
+const mappedProducts = (data || []).map((product) => ({
+id: product.id,
+code: product.product_code,
+barcode: product.barcode,
+name: product.name,
+category: product.category?.name || "-",
+price: Number(product.price).toFixed(2),
+stock: product.stock,
+unit: product.unit,
+status: product.status,
+}));
+
+setProducts(mappedProducts);
+}
+
+useEffect(() => {
+loadProducts();
+}, []);
+
 
 const filteredProducts = useMemo(() => {
 const search = keyword.trim().toLowerCase();
@@ -157,55 +148,79 @@ setFormData((prev) => ({
 
 }
 
-function handleAddProduct(event) {
+async function handleAddProduct(event) {
 event.preventDefault();
-
 
 const newCode = formData.code.trim().toUpperCase();
 const newBarcode = formData.barcode.trim();
+const categoryName = formData.category.trim();
 
 if (
-  !newCode ||
-  !newBarcode ||
-  !formData.name.trim() ||
-  !formData.category.trim() ||
-  !formData.price ||
-  !formData.stock
+!newCode ||
+!newBarcode ||
+!formData.name.trim() ||
+!categoryName ||
+!formData.price ||
+!formData.stock
 ) {
-  setFormError("กรุณากรอกข้อมูลสินค้าให้ครบทุกช่อง");
-  return;
+setFormError("กรุณากรอกข้อมูลสินค้าให้ครบทุกช่อง");
+return;
 }
 
-const isDuplicate = products.some(
-  (product) =>
-    product.code === newCode || product.barcode === newBarcode
+const { data: categoryData, error: categoryError } = await supabase
+.from("categories")
+.select("id")
+.eq("name", categoryName)
+.maybeSingle();
+
+if (categoryError) {
+console.error(categoryError);
+setFormError("ไม่สามารถตรวจสอบหมวดหมู่สินค้าได้");
+return;
+}
+
+if (!categoryData) {
+setFormError(
+"ไม่พบหมวดหมู่นี้ กรุณาใช้: แก้ว, ภาชนะบรรจุ, อุปกรณ์ชงเครื่องดื่ม, อุปกรณ์เสริม หรือ วัตถุดิบ"
 );
-
-if (isDuplicate) {
-  setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
-  return;
+return;
 }
 
-const newProduct = {
-  code: newCode,
-  barcode: newBarcode,
-  name: formData.name.trim(),
-  category: formData.category.trim(),
-  price: Number(formData.price).toFixed(2),
-  stock: Number(formData.stock),
-  unit: formData.unit.trim() || "ชิ้น",
-  status: formData.status,
-};
+const { error: insertError } = await supabase
+.from("products")
+.insert({
+product_code: newCode,
+barcode: newBarcode,
+name: formData.name.trim(),
+category_id: categoryData.id,
+price: Number(formData.price),
+stock: Number(formData.stock),
+unit: formData.unit.trim() || "ชิ้น",
+status: formData.status,
+});
 
-setProducts((prev) => [newProduct, ...prev]);
+if (insertError) {
+console.error(insertError);
+
+
+if (insertError.code === "23505") {
+  setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
+} else {
+  setFormError("บันทึกสินค้าไม่สำเร็จ กรุณาลองใหม่");
+}
+
+return;
+
+
+}
+
+await loadProducts();
+
 setFormData(emptyForm);
 setFormError("");
 setShowAddModal(false);
 
-setFoundProduct(newProduct);
-setShowDetail(true);
-
-
+alert("เพิ่มข้อมูลสินค้าสำเร็จ");
 }
 
 useEffect(() => {
@@ -273,7 +288,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
       <Menu active icon={<FaBox />} text="สินค้า" href="/user/products" />
       <Menu icon={<FaShoppingCart />} text="การขาย" href="/user/sales" />
       <Menu icon={<FaChartBar />} text="รายงาน" href="/user/reports" />
-      <Menu icon={<FaSignOutAlt />} text="ออกจากระบบ" href="/login" />
+      <LogoutButton />
     </nav>
   </aside>
 
