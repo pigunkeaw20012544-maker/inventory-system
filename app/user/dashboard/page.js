@@ -130,7 +130,7 @@ return products
 (product) =>
 product.status === "ใกล้หมด" ||
 product.status === "หมด" ||
-toNumber(product.stock) <= 20
+toNumber(product.stock) < 10
 )
 .sort((a, b) => toNumber(a.stock) - toNumber(b.stock));
 }, [products]);

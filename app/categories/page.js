@@ -1,5 +1,6 @@
 "use client";
 
+import AccountHeader from "../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../lib/supabase";
@@ -185,8 +186,10 @@ if (error) {
   if (error.code === "23505") {
     setFormError("ชื่อหมวดหมู่นี้มีอยู่ในระบบแล้ว");
   } else {
-    setFormError("บันทึกหมวดหมู่ไม่สำเร็จ กรุณาลองใหม่");
-  }
+  setFormError(
+    error.message || "บันทึกหมวดหมู่ไม่สำเร็จ กรุณาลองใหม่"
+  );
+}
 
   return;
 }
@@ -279,6 +282,9 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
   </aside>
 
   <main className="flex-1 min-w-0 p-6 xl:p-10">
+    <div className="flex justify-end mb-6">
+  <AccountHeader />
+</div>
     <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-6 mb-10">
       <div>
         <h1 className="text-4xl font-bold text-gray-900">

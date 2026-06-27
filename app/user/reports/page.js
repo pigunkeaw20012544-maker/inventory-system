@@ -1,5 +1,6 @@
 "use client";
 
+import AccountHeader from "../../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
@@ -109,7 +110,6 @@ const { data: salesData, error: salesError } = await supabase
     total_amount,
     created_at
   `)
-  .eq("seller_name", "User")
   .gte("sale_date", startDate)
   .lte("sale_date", endDate)
   .order("created_at", { ascending: false });
@@ -321,22 +321,15 @@ return ( <div className="min-h-screen flex bg-[#f8f9fb]"> <aside className="w-[3
       <div>
         <h1 className="text-4xl font-bold text-gray-900">รายงาน</h1>
         <p className="text-gray-500 mt-2">
-          Reports &gt; รายงานยอดขายของฉัน
+          Reports &gt; รายงานยอดขายรวม
+          แสดงบิลขายที่บันทึกโดย User ในช่วงวันที่เลือก
+          แสดงบิลขายทั้งหมดในช่วงวันที่เลือก
+          ยังไม่มีรายการขายของคุณในช่วงวันที่เลือก
+          ยังไม่มีรายการขายในช่วงวันที่เลือก
         </p>
       </div>
 
-      <div className="flex items-center gap-5">
-        <FaBell className="text-xl text-gray-700" />
-
-        <div className="w-12 h-12 rounded-full bg-red-600 text-white flex justify-center items-center">
-          <FaUser />
-        </div>
-
-        <div>
-          <h3 className="font-bold text-gray-900">พนักงานขาย</h3>
-          <p className="text-gray-500">User</p>
-        </div>
-      </div>
+      <AccountHeader />
     </div>
 
     <div className="bg-white rounded-3xl shadow-sm border p-6 mb-6 print:hidden">

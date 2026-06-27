@@ -1,5 +1,6 @@
 "use client";
 
+import AccountHeader from "../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../lib/supabase";
@@ -116,8 +117,26 @@ setCategories(data || []);
 }
 
 useEffect(() => {
-loadProducts();
-loadCategories();
+  loadProducts();
+  loadCategories();
+
+  const channel = supabase
+    .channel("admin-products-live")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products" },
+      () => loadProducts()
+    )
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "categories" },
+      () => loadCategories()
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }, []);
 
 const filteredProducts = useMemo(() => {
@@ -143,7 +162,7 @@ const lowStockCount = products.filter(
 (product) =>
 product.status === "ใกล้หมด" ||
 product.status === "หมด" ||
-Number(product.stock) <= 20
+Number(product.stock) < 10
 ).length;
 
 function openBarcodeModal(product) {
@@ -347,6 +366,9 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
   </aside>
 
   <main className="flex-1 min-w-0 p-6 xl:p-10">
+    <div className="flex justify-end mb-6">
+  <AccountHeader />
+</div>
     <div className="flex flex-col 2xl:flex-row 2xl:justify-between 2xl:items-center gap-6 mb-8">
       <div>
         <h1 className="text-4xl font-bold text-gray-900">สินค้า</h1>

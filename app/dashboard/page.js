@@ -1,5 +1,6 @@
 "use client";
 
+import AccountHeader from "../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../lib/supabase";
@@ -11,8 +12,6 @@ FaThLarge,
 FaShoppingCart,
 FaUsers,
 FaChartBar,
-FaSignOutAlt,
-FaBell,
 FaCalendarAlt,
 FaArrowRight,
 FaBriefcase,
@@ -144,7 +143,7 @@ return products
 (product) =>
 product.status === "ใกล้หมด" ||
 product.status === "หมด" ||
-toNumber(product.stock) <= 20
+toNumber(product.stock) < 10
 )
 .sort((a, b) => toNumber(a.stock) - toNumber(b.stock));
 }, [products]);
@@ -240,11 +239,13 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
   <main className="flex-1 min-w-0 p-6 xl:p-10">
     <div className="flex flex-col xl:flex-row xl:justify-between xl:items-start gap-6 mb-8">
       <div>
-        <h1 className="text-4xl font-bold text-gray-900">Dashboard</h1>
+        <h1 className="text-4xl font-bold text-gray-900">
+          Dashboard
+        </h1>
         <p className="text-gray-500 mt-2">ภาพรวมระบบ</p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-5">
+      <div className="flex flex-wrap items-center gap-4">
         <button
           onClick={handleRefresh}
           disabled={isRefreshing}
@@ -254,26 +255,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
           {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
         </button>
 
-        <div className="relative">
-          <FaBell className="text-2xl text-gray-700" />
-
-          {lowStockProducts.length > 0 && (
-            <span className="absolute -top-3 -right-3 bg-red-600 text-white text-xs min-w-5 h-5 px-1 rounded-full flex items-center justify-center">
-              {lowStockProducts.length > 99
-                ? "99+"
-                : lowStockProducts.length}
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <div className="w-14 h-14 bg-gray-800 rounded-full"></div>
-
-          <div>
-            <p className="font-bold text-gray-900">ผู้ดูแลระบบ</p>
-            <p className="text-sm text-gray-500">Administrator</p>
-          </div>
-        </div>
+        <AccountHeader />
       </div>
     </div>
 
@@ -375,7 +357,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
                   title={`${formatThaiDate(item.date)}: ${formatMoney(
                     item.amount
                   )} บาท`}
-                ></div>
+                />
 
                 <span className="text-xs text-gray-500">
                   {item.label}
@@ -548,7 +530,6 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
   </main>
 </div>
 
-
 );
 }
 
@@ -577,7 +558,7 @@ return ( <Link
    href={href}
    className="bg-white rounded-3xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow"
  > <div className="p-6">
-<div className={`w-16 h-16 ${bg} rounded-full mb-4`}></div>
+<div className={`w-16 h-16 ${bg} rounded-full mb-4`} />
 
 
     <p className="font-semibold text-gray-800">{title}</p>

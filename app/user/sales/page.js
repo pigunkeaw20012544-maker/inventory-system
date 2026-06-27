@@ -1,5 +1,6 @@
 "use client";
 
+import AccountHeader from "../../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
@@ -567,27 +568,7 @@ return ( <div className="min-h-screen flex bg-[#f8f9fb]"> <aside className="w-[3
         <p className="text-gray-500 mt-2">Sales &gt; การขายสินค้า</p>
       </div>
 
-      <div className="flex items-center gap-5">
-        <button
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="bg-white border rounded-xl px-5 py-3 flex items-center gap-2 text-gray-700 disabled:opacity-60"
-        >
-          <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
-          {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชสินค้า"}
-        </button>
-
-        <FaBell className="text-xl text-gray-700" />
-
-        <div className="w-12 h-12 rounded-full bg-red-600 text-white flex justify-center items-center">
-          <FaUser />
-        </div>
-
-        <div>
-          <h3 className="font-bold text-gray-900">พนักงานขาย</h3>
-          <p className="text-gray-500">User</p>
-        </div>
-      </div>
+      <AccountHeader />
     </div>
 
     {errorMessage && (

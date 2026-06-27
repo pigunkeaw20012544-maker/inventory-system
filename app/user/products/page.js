@@ -1,5 +1,6 @@
 "use client";
 
+import AccountHeader from "../../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
@@ -84,7 +85,20 @@ setProducts(mappedProducts);
 }
 
 useEffect(() => {
-loadProducts();
+  loadProducts();
+
+  const channel = supabase
+    .channel("user-products-live")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "products" },
+      () => loadProducts()
+    )
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }, []);
 
 
@@ -299,18 +313,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
         <p className="text-gray-500 mt-2">Products &gt; สินค้า</p>
       </div>
 
-      <div className="flex items-center gap-5">
-        <FaBell className="text-xl text-gray-700" />
-
-        <div className="w-12 h-12 bg-red-600 rounded-full flex items-center justify-center text-white">
-          <FaUser />
-        </div>
-
-        <div>
-          <p className="font-semibold text-gray-800">พนักงานขาย</p>
-          <p className="text-gray-500">User</p>
-        </div>
-      </div>
+      <AccountHeader />
     </header>
 
     <section className="bg-white rounded-3xl border shadow-sm p-6 md:p-8">
