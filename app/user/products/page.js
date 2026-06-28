@@ -1,736 +1,829 @@
 "use client";
 
-import AccountHeader from "../../components/AccountHeader";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
 import LogoutButton from "../../components/LogoutButton";
+import AccountHeader from "../../components/AccountHeader";
+
 import {
-FaHome,
-FaBox,
-FaShoppingCart,
-FaChartBar,
-FaSignOutAlt,
-FaBell,
-FaUser,
-FaBarcode,
-FaSearch,
-FaTimes,
-FaCamera,
-FaBoxOpen,
-FaCheckCircle,
-FaExclamationTriangle,
-FaPlus,
-FaSave,
+  FaBarcode,
+  FaBox,
+  FaBoxOpen,
+  FaChartBar,
+  FaCheckCircle,
+  FaExclamationTriangle,
+  FaHome,
+  FaPlus,
+  FaSave,
+  FaSearch,
+  FaShoppingCart,
+  FaSyncAlt,
+  FaTimes,
 } from "react-icons/fa";
 
+function normalizeValue(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
 
+function getCategoryName(category) {
+  if (Array.isArray(category)) {
+    return category[0]?.name || "-";
+  }
 
-const emptyForm = {
-code: "",
-barcode: "",
-name: "",
-category: "",
-price: "",
-stock: "",
-unit: "ชิ้น",
-status: "มีสินค้า",
-};
+  return category?.name || "-";
+}
+
+function getStatusFromStock(stock) {
+  const quantity = Number(stock || 0);
+
+  if (quantity <= 0) return "หมด";
+  if (quantity < 10) return "ใกล้หมด";
+
+  return "มีสินค้า";
+}
+
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getReceiveResult(data) {
+  if (Array.isArray(data)) {
+    return data[0] || {};
+  }
+
+  if (typeof data === "string") {
+    try {
+      return JSON.parse(data);
+    } catch {
+      return {};
+    }
+  }
+
+  return data || {};
+}
 
 export default function UserProductsPage() {
-const [products, setProducts] = useState([]);
-const [keyword, setKeyword] = useState("");
-const [foundProduct, setFoundProduct] = useState(null);
+  const barcodeInputRef = useRef(null);
 
-const [showScanner, setShowScanner] = useState(false);
-const [showDetail, setShowDetail] = useState(false);
-const [showAddModal, setShowAddModal] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [keyword, setKeyword] = useState("");
 
-const [formData, setFormData] = useState(emptyForm);
-const [formError, setFormError] = useState("");
-async function loadProducts() {
-const { data, error } = await supabase
-.from("products")
-.select(`       id,
-      product_code,
-      barcode,
-      name,
-      price,
-      stock,
-      unit,
-      status,
-      category:categories(name)
-    `)
-.order("id", { ascending: true });
+  const [barcodeValue, setBarcodeValue] = useState("");
+  const [scanMessage, setScanMessage] = useState(
+    "พร้อมยิงบาร์โค้ดสินค้า"
+  );
+  const [scanError, setScanError] = useState(false);
 
-if (error) {
-console.error("โหลดสินค้าไม่สำเร็จ:", error);
-alert("ไม่สามารถโหลดข้อมูลสินค้าจากฐานข้อมูลได้");
-return;
-}
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [showDetail, setShowDetail] = useState(false);
 
-const mappedProducts = (data || []).map((product) => ({
-id: product.id,
-code: product.product_code,
-barcode: product.barcode,
-name: product.name,
-category: product.category?.name || "-",
-price: Number(product.price).toFixed(2),
-stock: product.stock,
-unit: product.unit,
-status: product.status,
-}));
+  const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [receiveProductId, setReceiveProductId] = useState("");
+  const [receiveQuantity, setReceiveQuantity] = useState("");
+  const [receiveNote, setReceiveNote] = useState("");
+  const [receiveError, setReceiveError] = useState("");
 
-setProducts(mappedProducts);
-}
+  const [isLoading, setIsLoading] = useState(false);
+  const [isReceiving, setIsReceiving] = useState(false);
 
-useEffect(() => {
-  loadProducts();
+  async function loadProducts() {
+    setIsLoading(true);
 
-  const channel = supabase
-    .channel("user-products-live")
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "products" },
-      () => loadProducts()
-    )
-    .subscribe();
+    const { data, error } = await supabase
+      .from("products")
+      .select(`
+        id,
+        product_code,
+        barcode,
+        name,
+        price,
+        stock,
+        unit,
+        status,
+        category:categories(name)
+      `)
+      .order("id", { ascending: true });
 
-  return () => {
-    supabase.removeChannel(channel);
-  };
-}, []);
+    setIsLoading(false);
 
+    if (error) {
+      console.error(error);
+      alert(error.message || "ไม่สามารถโหลดข้อมูลสินค้าได้");
+      return;
+    }
 
-const filteredProducts = useMemo(() => {
-const search = keyword.trim().toLowerCase();
+    const mappedProducts = (data || []).map((product) => ({
+      id: product.id,
+      code: product.product_code || "-",
+      barcode: product.barcode || "",
+      name: product.name || "-",
+      category: getCategoryName(product.category),
+      price: Number(product.price || 0),
+      stock: Number(product.stock || 0),
+      unit: product.unit || "ชิ้น",
+      status: product.status || getStatusFromStock(product.stock),
+    }));
 
+    setProducts(mappedProducts);
+  }
 
-if (!search) return products;
+  useEffect(() => {
+    void loadProducts();
 
-return products.filter((product) =>
-  [
-    product.code,
-    product.barcode,
-    product.name,
-    product.category,
-    product.status,
-  ].some((value) => value.toLowerCase().includes(search))
-);
+    const channel = supabase
+      .channel("user-products-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "products",
+        },
+        () => void loadProducts()
+      )
+      .subscribe();
 
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
-}, [keyword, products]);
+  const filteredProducts = useMemo(() => {
+    const search = normalizeValue(keyword);
 
-function openProductDetail(product) {
-setFoundProduct(product);
-setShowDetail(true);
-}
+    if (!search) return products;
 
-function searchProduct(value = keyword) {
-const search = value.trim().toLowerCase();
-
-
-if (!search) return;
-
-const product = products.find(
-  (item) =>
-    item.barcode === search ||
-    item.code.toLowerCase() === search ||
-    item.name.toLowerCase().includes(search)
-);
-
-setFoundProduct(product || null);
-setShowDetail(true);
-
-
-}
-
-function handleSearch(event) {
-event.preventDefault();
-searchProduct();
-}
-
-function handleFormChange(event) {
-const { name, value } = event.target;
-
-
-setFormData((prev) => ({
-  ...prev,
-  [name]: value,
-}));
-
-
-}
-
-async function handleAddProduct(event) {
-event.preventDefault();
-
-const newCode = formData.code.trim().toUpperCase();
-const newBarcode = formData.barcode.trim();
-const categoryName = formData.category.trim();
-
-if (
-!newCode ||
-!newBarcode ||
-!formData.name.trim() ||
-!categoryName ||
-!formData.price ||
-!formData.stock
-) {
-setFormError("กรุณากรอกข้อมูลสินค้าให้ครบทุกช่อง");
-return;
-}
-
-const { data: categoryData, error: categoryError } = await supabase
-.from("categories")
-.select("id")
-.eq("name", categoryName)
-.maybeSingle();
-
-if (categoryError) {
-console.error(categoryError);
-setFormError("ไม่สามารถตรวจสอบหมวดหมู่สินค้าได้");
-return;
-}
-
-if (!categoryData) {
-setFormError(
-"ไม่พบหมวดหมู่นี้ กรุณาใช้: แก้ว, ภาชนะบรรจุ, อุปกรณ์ชงเครื่องดื่ม, อุปกรณ์เสริม หรือ วัตถุดิบ"
-);
-return;
-}
-
-const { error: insertError } = await supabase
-.from("products")
-.insert({
-product_code: newCode,
-barcode: newBarcode,
-name: formData.name.trim(),
-category_id: categoryData.id,
-price: Number(formData.price),
-stock: Number(formData.stock),
-unit: formData.unit.trim() || "ชิ้น",
-status: formData.status,
-});
-
-if (insertError) {
-console.error(insertError);
-
-
-if (insertError.code === "23505") {
-  setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
-} else {
-  setFormError("บันทึกสินค้าไม่สำเร็จ กรุณาลองใหม่");
-}
-
-return;
-
-
-}
-
-await loadProducts();
-
-setFormData(emptyForm);
-setFormError("");
-setShowAddModal(false);
-
-alert("เพิ่มข้อมูลสินค้าสำเร็จ");
-}
-
-useEffect(() => {
-if (!showScanner) return;
-
-
-let scanner;
-let cancelled = false;
-let scanned = false;
-
-const timer = window.setTimeout(async () => {
-  try {
-    const { Html5Qrcode } = await import("html5-qrcode");
-
-    if (cancelled) return;
-
-    scanner = new Html5Qrcode("barcode-reader");
-
-    await scanner.start(
-      { facingMode: "environment" },
-      {
-        fps: 10,
-        qrbox: { width: 280, height: 180 },
-      },
-      (decodedText) => {
-        if (cancelled || scanned) return;
-
-        scanned = true;
-        setKeyword(decodedText);
-
-        const product = products.find(
-          (item) => item.barcode === decodedText.trim()
-        );
-
-        setFoundProduct(product || null);
-        setShowScanner(false);
-        setShowDetail(true);
-      },
-      () => {}
+    return products.filter((product) =>
+      [
+        product.code,
+        product.barcode,
+        product.name,
+        product.category,
+        product.status,
+      ].some((value) => normalizeValue(value).includes(search))
     );
-  } catch (error) {
-    console.error(error);
-    alert("ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตใช้กล้อง หรือพิมพ์บาร์โค้ดแทน");
-    setShowScanner(false);
+  }, [products, keyword]);
+
+  const selectedReceiveProduct = useMemo(() => {
+    return (
+      products.find(
+        (product) => String(product.id) === String(receiveProductId)
+      ) || null
+    );
+  }, [products, receiveProductId]);
+
+  function findProduct(value) {
+    const search = normalizeValue(value);
+
+    if (!search) return null;
+
+    return (
+      products.find(
+        (product) =>
+          normalizeValue(product.barcode) === search ||
+          normalizeValue(product.code) === search ||
+          normalizeValue(product.name).includes(search)
+      ) || null
+    );
   }
-}, 200);
 
-return () => {
-  cancelled = true;
-  window.clearTimeout(timer);
-
-  if (scanner) {
-    scanner.stop().catch(() => {});
+  function focusBarcodeInput() {
+    window.setTimeout(() => {
+      barcodeInputRef.current?.focus();
+      barcodeInputRef.current?.select();
+    }, 50);
   }
-};
 
+  function openDetail(product) {
+    setSelectedProduct(product);
+    setShowDetail(true);
+  }
 
-}, [showScanner, products]);
+  function handleBarcodeKeyDown(event) {
+    if (event.key !== "Enter") return;
 
-return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[300px] shrink-0 bg-[#111b2b] text-white min-h-screen"> <div className="bg-red-600 p-8 rounded-br-[45px]"> <div className="text-3xl">🥤</div> <h2 className="font-bold mt-3 text-lg">ระบบบริหารจัดการ</h2> <p className="text-sm">ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</p> </div>
+    event.preventDefault();
 
+    const scannedValue = barcodeValue.trim();
 
-    <nav className="p-5 space-y-4">
-      <Menu icon={<FaHome />} text="หน้าหลัก" href="/user/dashboard" />
-      <Menu active icon={<FaBox />} text="สินค้า" href="/user/products" />
-      <Menu icon={<FaShoppingCart />} text="การขาย" href="/user/sales" />
-      <Menu icon={<FaChartBar />} text="รายงาน" href="/user/reports" />
-      <LogoutButton />
-    </nav>
-  </aside>
+    if (!scannedValue) {
+      setScanError(true);
+      setScanMessage("กรุณายิงบาร์โค้ด หรือกรอกรหัสสินค้า");
+      focusBarcodeInput();
+      return;
+    }
 
-  <main className="flex-1 min-w-0 p-6 xl:p-10">
-    <header className="flex justify-between items-start mb-8">
-      <div>
-        <h1 className="text-4xl font-bold text-gray-900">สินค้า</h1>
-        <p className="text-gray-500 mt-2">Products &gt; สินค้า</p>
-      </div>
+    const product = findProduct(scannedValue);
 
-      <AccountHeader />
-    </header>
+    if (!product) {
+      setScanError(true);
+      setScanMessage(`ไม่พบสินค้า: ${scannedValue}`);
+      setBarcodeValue("");
+      focusBarcodeInput();
+      return;
+    }
 
-    <section className="bg-white rounded-3xl border shadow-sm p-6 md:p-8">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">
-            ค้นหาสินค้าด้วยบาร์โค้ด
+    setScanError(false);
+    setScanMessage(
+      `พบสินค้า: ${product.name} · คงเหลือ ${product.stock} ${product.unit}`
+    );
+
+    setBarcodeValue("");
+    openDetail(product);
+    focusBarcodeInput();
+  }
+
+  function handleSearch(event) {
+    event.preventDefault();
+
+    const value = keyword.trim();
+
+    if (!value) {
+      setSelectedProduct(null);
+      setShowDetail(true);
+      return;
+    }
+
+    const product = findProduct(value);
+
+    setSelectedProduct(product);
+    setShowDetail(true);
+  }
+
+  function openReceiveModal(product = null) {
+    setReceiveProductId(product ? String(product.id) : "");
+    setReceiveQuantity("");
+    setReceiveNote("");
+    setReceiveError("");
+    setShowReceiveModal(true);
+  }
+
+  function closeReceiveModal() {
+    if (isReceiving) return;
+
+    setShowReceiveModal(false);
+    setReceiveProductId("");
+    setReceiveQuantity("");
+    setReceiveNote("");
+    setReceiveError("");
+  }
+
+  async function handleReceiveStock(event) {
+    event.preventDefault();
+
+    const productId = Number(receiveProductId);
+    const quantity = Number(receiveQuantity);
+
+    if (!Number.isInteger(productId) || productId <= 0) {
+      setReceiveError("กรุณาเลือกสินค้าที่ต้องการรับเข้า");
+      return;
+    }
+
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      setReceiveError("จำนวนรับสินค้าเข้าต้องเป็นจำนวนเต็มมากกว่า 0");
+      return;
+    }
+
+    const productBeforeReceive = selectedReceiveProduct;
+
+    setIsReceiving(true);
+    setReceiveError("");
+
+    const { data, error } = await supabase.rpc("receive_stock", {
+      p_product_id: productId,
+      p_quantity: quantity,
+      p_note: receiveNote.trim() || null,
+    });
+
+    setIsReceiving(false);
+
+    if (error) {
+      console.error(error);
+      setReceiveError(error.message || "รับสินค้าเข้าไม่สำเร็จ");
+      return;
+    }
+
+    const result = getReceiveResult(data);
+    const returnedStock = Number(result.stock_after);
+
+    const stockAfter = Number.isFinite(returnedStock)
+      ? returnedStock
+      : Number(productBeforeReceive?.stock || 0) + quantity;
+
+    await loadProducts();
+
+    setSelectedProduct((previous) => {
+      if (!previous || String(previous.id) !== String(productId)) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        stock: stockAfter,
+        status: getStatusFromStock(stockAfter),
+      };
+    });
+
+    closeReceiveModal();
+
+    alert(
+      `${result.message || "รับสินค้าเข้าสำเร็จ"}\nสินค้า: ${
+        productBeforeReceive?.name || "-"
+      }\nคงเหลือ: ${stockAfter} ${
+        productBeforeReceive?.unit || "ชิ้น"
+      }`
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f8f9fb] flex">
+      <aside className="w-[300px] shrink-0 bg-[#111b2b] text-white min-h-screen">
+        <div className="bg-red-600 p-8 rounded-br-[45px]">
+          <div className="text-3xl">🥤</div>
+
+          <h2 className="font-bold mt-3 text-lg">
+            ระบบบริหารจัดการ
           </h2>
 
-          <p className="text-gray-500 mt-2">
-            กดสแกนด้วยกล้อง หรือใช้เครื่องยิงบาร์โค้ดกับช่องค้นหา
+          <p className="text-sm">
+            ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={() => {
-              setFormError("");
-              setShowAddModal(true);
-            }}
-            className="border border-red-600 text-red-600 px-6 py-4 rounded-xl flex items-center justify-center gap-3 hover:bg-red-50"
-          >
-            <FaPlus />
-            เพิ่มข้อมูลสินค้า
-          </button>
-
-          <button
-            onClick={() => setShowScanner(true)}
-            className="bg-red-600 text-white px-6 py-4 rounded-xl flex items-center justify-center gap-3 shadow hover:bg-red-700"
-          >
-            <FaCamera />
-            สแกนบาร์โค้ด
-          </button>
-        </div>
-      </div>
-
-      <form
-        onSubmit={handleSearch}
-        className="mt-7 flex flex-col md:flex-row gap-4"
-      >
-        <div className="relative flex-1">
-          <FaBarcode className="absolute left-5 top-5 text-gray-500" />
-
-          <input
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="พิมพ์หรือยิงบาร์โค้ด เช่น 8851234567890"
-            className="w-full border-2 border-gray-300 focus:border-red-500 rounded-xl py-4 pl-12 pr-5 outline-none text-gray-800"
-          />
-        </div>
-
-        <button
-          type="submit"
-          className="bg-red-600 text-white px-8 py-4 rounded-xl flex items-center justify-center gap-3"
-        >
-          <FaSearch />
-          ค้นหาสินค้า
-        </button>
-      </form>
-    </section>
-
-    <section className="mt-8 bg-white rounded-3xl border shadow-sm p-6">
-      <div className="flex items-center justify-between mb-5">
-        <h2 className="text-2xl font-bold text-gray-900">รายการสินค้า</h2>
-        <p className="text-gray-500">ทั้งหมด {filteredProducts.length} รายการ</p>
-      </div>
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-gray-800">
-          <thead>
-            <tr className="bg-gray-100 text-gray-700">
-              <th className="p-4 text-left">รหัสสินค้า</th>
-              <th className="p-4 text-left">ชื่อสินค้า</th>
-              <th className="p-4 text-left">หมวดหมู่</th>
-              <th className="p-4 text-left">ราคาขาย</th>
-              <th className="p-4 text-left">สต็อก</th>
-              <th className="p-4 text-left">บาร์โค้ด</th>
-              <th className="p-4 text-center">รายละเอียด</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {filteredProducts.map((product) => (
-              <tr key={product.code} className="border-b">
-                <td className="p-4">{product.code}</td>
-                <td className="p-4 font-medium">{product.name}</td>
-                <td className="p-4">{product.category}</td>
-                <td className="p-4">{product.price} บาท</td>
-                <td className="p-4">
-                  {product.stock} {product.unit}
-                </td>
-                <td className="p-4 font-mono text-sm">{product.barcode}</td>
-
-                <td className="p-4 text-center">
-                  <button
-                    onClick={() => openProductDetail(product)}
-                    className="border border-red-500 text-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
-                  >
-                    ดูสินค้า
-                  </button>
-                </td>
-              </tr>
-            ))}
-
-            {filteredProducts.length === 0 && (
-              <tr>
-                <td colSpan="7" className="p-10 text-center text-gray-500">
-                  ไม่พบสินค้าที่ค้นหา
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  </main>
-
-  {showAddModal && (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <form
-        onSubmit={handleAddProduct}
-        className="bg-white w-full max-w-3xl rounded-3xl p-7 md:p-8 relative max-h-[90vh] overflow-y-auto"
-      >
-        <button
-          type="button"
-          onClick={() => setShowAddModal(false)}
-          className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
-        >
-          <FaTimes className="text-2xl" />
-        </button>
-
-        <h2 className="text-2xl font-bold text-gray-900">
-          เพิ่มข้อมูลสินค้า
-        </h2>
-
-        <p className="text-gray-500 mt-2">
-          กรอกข้อมูลสินค้าเพื่อเพิ่มเข้าสู่รายการสินค้า
-        </p>
-
-        {formError && (
-          <div className="mt-5 rounded-xl bg-red-50 border border-red-200 text-red-600 px-4 py-3">
-            {formError}
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
-          <Field
-            label="รหัสสินค้า"
-            name="code"
-            value={formData.code}
-            onChange={handleFormChange}
-            placeholder="เช่น BEV-0009"
+        <nav className="p-5 space-y-4">
+          <Menu
+            icon={<FaHome />}
+            text="หน้าหลัก"
+            href="/user/dashboard"
           />
 
-          <Field
-            label="บาร์โค้ด"
-            name="barcode"
-            value={formData.barcode}
-            onChange={handleFormChange}
-            placeholder="เช่น 8851234500098"
+          <Menu
+            active
+            icon={<FaBox />}
+            text="สินค้า"
+            href="/user/products"
           />
 
-          <Field
-            label="ชื่อสินค้า"
-            name="name"
-            value={formData.name}
-            onChange={handleFormChange}
-            placeholder="ชื่อสินค้า"
+          <Menu
+            icon={<FaShoppingCart />}
+            text="การขาย"
+            href="/user/sales"
           />
 
-          <Field
-            label="หมวดหมู่"
-            name="category"
-            value={formData.category}
-            onChange={handleFormChange}
-            placeholder="เช่น แก้ว / วัตถุดิบ"
+          <Menu
+            icon={<FaChartBar />}
+            text="รายงาน"
+            href="/user/reports"
           />
 
-          <Field
-            label="ราคาขาย (บาท)"
-            name="price"
-            type="number"
-            value={formData.price}
-            onChange={handleFormChange}
-            placeholder="0.00"
-          />
+          <LogoutButton />
+        </nav>
+      </aside>
 
-          <Field
-            label="จำนวนสินค้า"
-            name="stock"
-            type="number"
-            value={formData.stock}
-            onChange={handleFormChange}
-            placeholder="0"
-          />
-
-          <Field
-            label="หน่วยนับ"
-            name="unit"
-            value={formData.unit}
-            onChange={handleFormChange}
-            placeholder="ชิ้น"
-          />
-
+      <main className="flex-1 min-w-0 p-6 xl:p-10">
+        <header className="flex flex-col gap-5 lg:flex-row lg:justify-between lg:items-start mb-8">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              สถานะสินค้า
-            </label>
+            <h1 className="text-4xl font-bold text-gray-900">
+              สินค้า
+            </h1>
 
-            <select
-              name="status"
-              value={formData.status}
-              onChange={handleFormChange}
-              className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
-            >
-              <option value="มีสินค้า">มีสินค้า</option>
-              <option value="ใกล้หมด">ใกล้หมด</option>
-              <option value="หมด">หมด</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 mt-8">
-          <button
-            type="button"
-            onClick={() => setShowAddModal(false)}
-            className="border px-5 py-3 rounded-xl text-gray-700"
-          >
-            ยกเลิก
-          </button>
-
-          <button
-            type="submit"
-            className="bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2"
-          >
-            <FaSave />
-            บันทึกสินค้า
-          </button>
-        </div>
-      </form>
-    </div>
-  )}
-
-  {showScanner && (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-xl rounded-3xl p-7 relative">
-        <button
-          onClick={() => setShowScanner(false)}
-          className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
-        >
-          <FaTimes className="text-2xl" />
-        </button>
-
-        <h2 className="text-2xl font-bold text-gray-900">
-          สแกนบาร์โค้ดสินค้า
-        </h2>
-
-        <p className="text-gray-500 mt-2">
-          หันกล้องไปที่บาร์โค้ด ระบบจะค้นหาให้ทันที
-        </p>
-
-        <div className="mt-6 rounded-2xl overflow-hidden border bg-black">
-          <div id="barcode-reader" className="w-full min-h-[280px]" />
-        </div>
-
-        <button
-          onClick={() => setShowScanner(false)}
-          className="mt-5 w-full border py-3 rounded-xl text-gray-700"
-        >
-          ยกเลิกการสแกน
-        </button>
-      </div>
-    </div>
-  )}
-
-  {showDetail && (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-lg rounded-3xl p-8 relative">
-        <button
-          onClick={() => setShowDetail(false)}
-          className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
-        >
-          <FaTimes className="text-2xl" />
-        </button>
-
-        {foundProduct ? (
-          <>
-            <div className="flex items-center gap-4">
-              <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
-                <FaBoxOpen className="text-2xl" />
-              </div>
-
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  ข้อมูลสินค้า
-                </h2>
-                <p className="text-gray-500">{foundProduct.code}</p>
-              </div>
-            </div>
-
-            <div className="mt-7 border rounded-2xl p-5">
-              <p className="text-xl font-bold text-gray-900">
-                {foundProduct.name}
-              </p>
-
-              <div className="grid grid-cols-2 gap-4 mt-5 text-gray-700">
-                <Info label="หมวดหมู่" value={foundProduct.category} />
-                <Info label="ราคาขาย" value={`${foundProduct.price} บาท`} />
-                <Info
-                  label="จำนวนคงเหลือ"
-                  value={`${foundProduct.stock} ${foundProduct.unit}`}
-                />
-                <Info label="บาร์โค้ด" value={foundProduct.barcode} />
-              </div>
-
-              <div className="mt-5">
-                <span
-                  className={`inline-flex items-center gap-2 px-4 py-2 rounded-full ${
-                    foundProduct.status === "มีสินค้า"
-                      ? "bg-green-100 text-green-600"
-                      : foundProduct.status === "ใกล้หมด"
-                      ? "bg-orange-100 text-orange-600"
-                      : "bg-red-100 text-red-600"
-                  }`}
-                >
-                  <FaCheckCircle />
-                  {foundProduct.status}
-                </span>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="text-center py-8">
-            <FaExclamationTriangle className="text-5xl text-orange-500 mx-auto" />
-            <h2 className="text-2xl font-bold text-gray-900 mt-5">
-              ไม่พบสินค้า
-            </h2>
             <p className="text-gray-500 mt-2">
-              ไม่พบข้อมูลจากบาร์โค้ดนี้ในระบบ
+              Products &gt; สินค้า
             </p>
           </div>
-        )}
 
-        <button
-          onClick={() => setShowDetail(false)}
-          className="mt-7 w-full bg-red-600 text-white py-3 rounded-xl"
-        >
-          ปิดหน้าต่าง
-        </button>
-      </div>
+          <AccountHeader />
+        </header>
+
+        <section className="bg-white rounded-3xl border shadow-sm p-6 md:p-8">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">
+                ค้นหาและตรวจสอบสินค้า
+              </h2>
+
+              <p className="text-gray-500 mt-2">
+                User ค้นหาสินค้า ยิงบาร์โค้ด และรับสินค้าเข้าได้
+                แต่ไม่สามารถเพิ่มสินค้าใหม่ได้
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => openReceiveModal()}
+                className="border border-red-600 text-red-600 px-6 py-4 rounded-xl flex items-center gap-3 hover:bg-red-50"
+              >
+                <FaPlus />
+                รับสินค้าเข้า
+              </button>
+
+              <button
+                type="button"
+                onClick={() => void loadProducts()}
+                disabled={isLoading}
+                className="bg-red-600 text-white px-6 py-4 rounded-xl flex items-center gap-3 disabled:bg-red-300"
+              >
+                <FaSyncAlt className={isLoading ? "animate-spin" : ""} />
+                รีเฟรชข้อมูล
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border-2 border-dashed border-red-200 bg-red-50 p-5">
+            <label className="flex items-center gap-2 font-bold text-gray-800 mb-3">
+              <FaBarcode className="text-red-600" />
+              ยิงบาร์โค้ดสินค้า
+            </label>
+
+            <input
+              ref={barcodeInputRef}
+              value={barcodeValue}
+              onChange={(event) => setBarcodeValue(event.target.value)}
+              onKeyDown={handleBarcodeKeyDown}
+              autoComplete="off"
+              placeholder="คลิกช่องนี้ แล้วใช้เครื่องยิงบาร์โค้ด"
+              className="w-full rounded-xl border bg-white px-5 py-4 text-lg text-gray-800 outline-none focus:border-red-500"
+            />
+
+            <div
+              className={`mt-3 rounded-xl px-4 py-3 text-sm ${
+                scanError
+                  ? "bg-red-100 text-red-700"
+                  : "bg-white text-gray-600"
+              }`}
+            >
+              {scanMessage}
+            </div>
+
+            <p className="mt-3 text-sm text-gray-500">
+              รองรับเครื่องยิงบาร์โค้ด USB หรือ Bluetooth
+              ที่ส่งปุ่ม Enter หลังรหัสสินค้า
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleSearch}
+            className="mt-6 flex flex-col md:flex-row gap-4"
+          >
+            <div className="relative flex-1">
+              <FaSearch className="absolute left-5 top-5 text-gray-500" />
+
+              <input
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="ค้นหาด้วยชื่อสินค้า / รหัสสินค้า"
+                className="w-full border-2 border-gray-300 focus:border-red-500 rounded-xl py-4 pl-12 pr-5 outline-none text-gray-800"
+              />
+            </div>
+
+            <button
+              type="submit"
+              className="bg-red-600 text-white px-8 py-4 rounded-xl flex items-center justify-center gap-3"
+            >
+              <FaSearch />
+              ค้นหาสินค้า
+            </button>
+          </form>
+        </section>
+
+        <section className="mt-8 bg-white rounded-3xl border shadow-sm p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-2xl font-bold text-gray-900">
+              รายการสินค้า
+            </h2>
+
+            <p className="text-gray-500">
+              ทั้งหมด {filteredProducts.length} รายการ
+            </p>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-gray-800">
+              <thead>
+                <tr className="bg-gray-100 text-gray-700">
+                  <th className="p-4 text-left">รหัสสินค้า</th>
+                  <th className="p-4 text-left">ชื่อสินค้า</th>
+                  <th className="p-4 text-left">หมวดหมู่</th>
+                  <th className="p-4 text-left">ราคาขาย</th>
+                  <th className="p-4 text-left">สต๊อก</th>
+                  <th className="p-4 text-left">บาร์โค้ด</th>
+                  <th className="p-4 text-center">รายละเอียด</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {filteredProducts.map((product) => (
+                  <tr key={product.id} className="border-b">
+                    <td className="p-4">{product.code}</td>
+
+                    <td className="p-4 font-medium">
+                      {product.name}
+                    </td>
+
+                    <td className="p-4">
+                      {product.category}
+                    </td>
+
+                    <td className="p-4">
+                      {formatMoney(product.price)} บาท
+                    </td>
+
+                    <td className="p-4">
+                      {product.stock} {product.unit}
+                    </td>
+
+                    <td className="p-4 font-mono text-sm">
+                      {product.barcode || "-"}
+                    </td>
+
+                    <td className="p-4 text-center">
+                      <button
+                        type="button"
+                        onClick={() => openDetail(product)}
+                        className="border border-red-500 text-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
+                      >
+                        ดูสินค้า
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+
+                {filteredProducts.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan="7"
+                      className="p-10 text-center text-gray-500"
+                    >
+                      ไม่พบสินค้าที่ค้นหา
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+
+      {showReceiveModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <form
+            onSubmit={handleReceiveStock}
+            className="bg-white w-full max-w-xl rounded-3xl p-7 md:p-8 relative"
+          >
+            <button
+              type="button"
+              onClick={closeReceiveModal}
+              className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
+            >
+              <FaTimes className="text-2xl" />
+            </button>
+
+            <h2 className="text-2xl font-bold text-gray-900">
+              รับสินค้าเข้า
+            </h2>
+
+            <p className="text-gray-500 mt-2">
+              เลือกสินค้าที่มีอยู่แล้ว และระบุจำนวนที่รับเข้า
+            </p>
+
+            {receiveError && (
+              <div className="mt-5 rounded-xl bg-red-50 border border-red-200 text-red-600 px-4 py-3">
+                {receiveError}
+              </div>
+            )}
+
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                สินค้า
+              </label>
+
+              <select
+                value={receiveProductId}
+                onChange={(event) => setReceiveProductId(event.target.value)}
+                className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+              >
+                <option value="">-- เลือกสินค้า --</option>
+
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.code} - {product.name} (คงเหลือ{" "}
+                    {product.stock} {product.unit})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {selectedReceiveProduct && (
+              <div className="mt-4 rounded-xl bg-gray-50 border p-4">
+                <p className="font-semibold text-gray-900">
+                  {selectedReceiveProduct.name}
+                </p>
+
+                <p className="mt-1 text-sm text-gray-500">
+                  รหัสสินค้า: {selectedReceiveProduct.code} · คงเหลือ{" "}
+                  {selectedReceiveProduct.stock}{" "}
+                  {selectedReceiveProduct.unit}
+                </p>
+              </div>
+            )}
+
+            <div className="mt-5">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                จำนวนรับเข้า
+              </label>
+
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={receiveQuantity}
+                onChange={(event) => setReceiveQuantity(event.target.value)}
+                placeholder="เช่น 50"
+                className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+              />
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                หมายเหตุ
+              </label>
+
+              <textarea
+                value={receiveNote}
+                onChange={(event) => setReceiveNote(event.target.value)}
+                placeholder="เช่น รับจากร้านค้าส่ง"
+                rows="3"
+                className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500 resize-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 mt-8">
+              <button
+                type="button"
+                onClick={closeReceiveModal}
+                className="border px-5 py-3 rounded-xl text-gray-700"
+              >
+                ยกเลิก
+              </button>
+
+              <button
+                type="submit"
+                disabled={isReceiving}
+                className="bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2 disabled:bg-red-300"
+              >
+                <FaSave />
+                {isReceiving ? "กำลังบันทึก..." : "บันทึกรับสินค้า"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showDetail && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-3xl p-8 relative">
+            <button
+              type="button"
+              onClick={() => setShowDetail(false)}
+              className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
+            >
+              <FaTimes className="text-2xl" />
+            </button>
+
+            {selectedProduct ? (
+              <>
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
+                    <FaBoxOpen className="text-2xl" />
+                  </div>
+
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900">
+                      ข้อมูลสินค้า
+                    </h2>
+
+                    <p className="text-gray-500">
+                      {selectedProduct.code}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-7 border rounded-2xl p-5">
+                  <p className="text-xl font-bold text-gray-900">
+                    {selectedProduct.name}
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-4 mt-5 text-gray-700">
+                    <Info
+                      label="หมวดหมู่"
+                      value={selectedProduct.category}
+                    />
+
+                    <Info
+                      label="ราคาขาย"
+                      value={`${formatMoney(selectedProduct.price)} บาท`}
+                    />
+
+                    <Info
+                      label="จำนวนคงเหลือ"
+                      value={`${selectedProduct.stock} ${selectedProduct.unit}`}
+                    />
+
+                    <Info
+                      label="บาร์โค้ด"
+                      value={selectedProduct.barcode || "-"}
+                    />
+                  </div>
+
+                  <div className="mt-5">
+                    <StatusBadge status={selectedProduct.status} />
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDetail(false);
+                    openReceiveModal(selectedProduct);
+                  }}
+                  className="mt-5 w-full border border-red-300 text-red-600 py-3 rounded-xl flex items-center justify-center gap-2"
+                >
+                  <FaPlus />
+                  รับสินค้าเข้ารายการนี้
+                </button>
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <FaExclamationTriangle className="text-5xl text-orange-500 mx-auto" />
+
+                <h2 className="text-2xl font-bold text-gray-900 mt-5">
+                  ไม่พบสินค้า
+                </h2>
+
+                <p className="text-gray-500 mt-2">
+                  ไม่พบข้อมูลจากบาร์โค้ดหรือรหัสสินค้านี้
+                </p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setShowDetail(false)}
+              className="mt-7 w-full bg-red-600 text-white py-3 rounded-xl"
+            >
+              ปิดหน้าต่าง
+            </button>
+          </div>
+        </div>
+      )}
     </div>
-  )}
-</div>
-
-
-);
+  );
 }
 
 function Menu({ icon, text, href, active }) {
-return (
-<Link
-href={href}
-className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl whitespace-nowrap ${
+  return (
+    <Link
+      href={href}
+      className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl whitespace-nowrap ${
         active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
       }`}
-> <span className="text-xl">{icon}</span> <span>{text}</span> </Link>
-);
-}
-
-function Field({
-label,
-name,
-value,
-onChange,
-placeholder,
-type = "text",
-}) {
-return ( <div> <label className="block text-sm font-medium text-gray-700 mb-2">
-{label} </label>
-
-  <input
-    type={type}
-    name={name}
-    value={value}
-    onChange={onChange}
-    placeholder={placeholder}
-    className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
-  />
-</div>
-
-
-);
+    >
+      <span className="text-xl">{icon}</span>
+      <span>{text}</span>
+    </Link>
+  );
 }
 
 function Info({ label, value }) {
-return ( <div> <p className="text-sm text-gray-500">{label}</p> <p className="font-semibold mt-1 break-words">{value}</p> </div>
-);
+  return (
+    <div>
+      <p className="text-sm text-gray-500">{label}</p>
+      <p className="font-semibold mt-1 break-words">{value}</p>
+    </div>
+  );
 }
 
 function StatusBadge({ status }) {
-const statusStyle = {
-"มีสินค้า": "bg-green-100 text-green-600",
-"พร้อมขาย": "bg-green-100 text-green-600",
-"ใกล้หมด": "bg-orange-100 text-orange-600",
-"หมด": "bg-red-100 text-red-600",
-};
+  const statusStyle = {
+    มีสินค้า: "bg-green-100 text-green-600",
+    พร้อมขาย: "bg-green-100 text-green-600",
+    ใกล้หมด: "bg-orange-100 text-orange-600",
+    หมด: "bg-red-100 text-red-600",
+  };
 
-const colorClass =
-statusStyle[status] || "bg-gray-100 text-gray-600";
-
-return (
-<span
-className={
-"inline-flex whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium " +
-colorClass
-}
->
-{status} </span>
-);
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium ${
+        statusStyle[status] || "bg-gray-100 text-gray-600"
+      }`}
+    >
+      <FaCheckCircle />
+      {status}
+    </span>
+  );
 }

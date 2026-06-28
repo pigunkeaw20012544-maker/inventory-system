@@ -4,6 +4,8 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const ONLINE_WINDOW_MS = 90 * 1000;
+
 function json(data, status = 200) {
   return NextResponse.json(data, {
     status,
@@ -15,6 +17,19 @@ function json(data, status = 200) {
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function isOnline(lastSeenAt, isActive) {
+  if (isActive === false || !lastSeenAt) return false;
+
+  const lastSeenMs = new Date(lastSeenAt).getTime();
+  const elapsedMs = Date.now() - lastSeenMs;
+
+  return (
+    Number.isFinite(lastSeenMs) &&
+    elapsedMs >= 0 &&
+    elapsedMs <= ONLINE_WINDOW_MS
+  );
 }
 
 function getAdminClient() {
@@ -95,6 +110,7 @@ export async function GET(request) {
         phone,
         role,
         is_active,
+        last_seen_at,
         created_at
       `)
       .order("created_at", { ascending: true });
@@ -103,7 +119,12 @@ export async function GET(request) {
       return json({ error: error.message }, 400);
     }
 
-    return json({ users: data || [] });
+    const users = (data || []).map((user) => ({
+      ...user,
+      is_online: isOnline(user.last_seen_at, user.is_active),
+    }));
+
+    return json({ users });
   } catch (error) {
     return json(
       { error: error.message || "โหลดข้อมูลผู้ใช้งานไม่สำเร็จ" },
@@ -234,14 +255,17 @@ export async function PATCH(request) {
       );
     }
 
-    const authData = { email };
+    const authData = {
+  email,
+  ban_duration: isActive ? "none" : "876000h",
+};
 
-    if (password) {
-      authData.password = password;
-    }
+if (password) {
+  authData.password = password;
+}
 
-    const { error: authError } =
-      await access.admin.auth.admin.updateUserById(userId, authData);
+const { error: authError } =
+  await access.admin.auth.admin.updateUserById(userId, authData);
 
     if (authError) {
       return json(

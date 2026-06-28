@@ -1,10 +1,10 @@
 "use client";
 
-import AccountHeader from "../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../lib/supabase";
 import LogoutButton from "../components/LogoutButton";
+import AccountHeader from "../components/AccountHeader";
 import {
 FaHome,
 FaBox,
@@ -12,7 +12,7 @@ FaThLarge,
 FaShoppingCart,
 FaUsers,
 FaChartBar,
-FaSignOutAlt,
+FaHistory,
 FaPlus,
 FaEdit,
 FaTrash,
@@ -22,7 +22,7 @@ FaTimes,
 FaSave,
 } from "react-icons/fa";
 
-const emptyForm = {
+const EMPTY_FORM = {
 name: "",
 description: "",
 is_active: true,
@@ -36,42 +36,51 @@ const [showModal, setShowModal] = useState(false);
 const [modalMode, setModalMode] = useState("add");
 const [editingCategory, setEditingCategory] = useState(null);
 
-const [formData, setFormData] = useState(emptyForm);
+const [formData, setFormData] = useState(EMPTY_FORM);
 const [formError, setFormError] = useState("");
 const [isSaving, setIsSaving] = useState(false);
 const [isRefreshing, setIsRefreshing] = useState(false);
 
 async function loadCategories() {
-const [
-{ data: categoryData, error: categoryError },
-{ data: productData, error: productError },
-] = await Promise.all([
+const results = await Promise.all([
 supabase
 .from("categories")
 .select("id, name, description, is_active")
 .order("id", { ascending: true }),
-supabase.from("products").select("id, category_id"),
+
+
+  supabase.from("products").select("id, category_id"),
 ]);
 
+const categoryResult = results[0];
+const productResult = results[1];
 
-if (categoryError || productError) {
-  console.error(categoryError || productError);
+if (categoryResult.error || productResult.error) {
+  console.error(categoryResult.error || productResult.error);
   alert("ไม่สามารถโหลดข้อมูลหมวดหมู่ได้");
   return;
 }
 
-const productCount = (productData || []).reduce((result, product) => {
-  result[product.category_id] = (result[product.category_id] || 0) + 1;
-  return result;
-}, {});
+const productCount = (productResult.data || []).reduce(
+  (result, product) => {
+    const categoryId = String(product.category_id || "");
 
-const mappedCategories = (categoryData || []).map((category) => ({
-  id: category.id,
-  name: category.name,
-  description: category.description || "-",
-  isActive: category.is_active,
-  total: productCount[category.id] || 0,
-}));
+    result[categoryId] = (result[categoryId] || 0) + 1;
+
+    return result;
+  },
+  {}
+);
+
+const mappedCategories = (categoryResult.data || []).map(
+  (category) => ({
+    id: category.id,
+    name: category.name || "-",
+    description: category.description || "-",
+    isActive: category.is_active !== false,
+    total: productCount[String(category.id)] || 0,
+  })
+);
 
 setCategories(mappedCategories);
 
@@ -79,7 +88,7 @@ setCategories(mappedCategories);
 }
 
 useEffect(() => {
-loadCategories();
+void loadCategories();
 }, []);
 
 const filteredCategories = useMemo(() => {
@@ -88,11 +97,11 @@ const search = keyword.trim().toLowerCase();
 
 if (!search) return categories;
 
-return categories.filter((category) =>
-  [category.name, category.description].some((value) =>
-    String(value).toLowerCase().includes(search)
-  )
-);
+return categories.filter((category) => {
+  return [category.name, category.description].some((value) =>
+    String(value || "").toLowerCase().includes(search)
+  );
+});
 
 
 }, [categories, keyword]);
@@ -100,7 +109,7 @@ return categories.filter((category) =>
 function openAddModal() {
 setModalMode("add");
 setEditingCategory(null);
-setFormData(emptyForm);
+setFormData(EMPTY_FORM);
 setFormError("");
 setShowModal(true);
 }
@@ -128,7 +137,7 @@ if (isSaving) return;
 
 setShowModal(false);
 setEditingCategory(null);
-setFormData(emptyForm);
+setFormData(EMPTY_FORM);
 setFormError("");
 
 
@@ -167,29 +176,29 @@ const payload = {
   is_active: formData.is_active,
 };
 
-let error;
+let response;
 
 if (modalMode === "add") {
-  ({ error } = await supabase.from("categories").insert(payload));
+  response = await supabase.from("categories").insert(payload);
 } else {
-  ({ error } = await supabase
+  response = await supabase
     .from("categories")
     .update(payload)
-    .eq("id", editingCategory.id));
+    .eq("id", editingCategory.id);
 }
 
 setIsSaving(false);
 
-if (error) {
-  console.error(error);
+if (response.error) {
+  console.error(response.error);
 
-  if (error.code === "23505") {
+  if (response.error.code === "23505") {
     setFormError("ชื่อหมวดหมู่นี้มีอยู่ในระบบแล้ว");
   } else {
-  setFormError(
-    error.message || "บันทึกหมวดหมู่ไม่สำเร็จ กรุณาลองใหม่"
-  );
-}
+    setFormError(
+      response.error.message || "บันทึกหมวดหมู่ไม่สำเร็จ กรุณาลองใหม่"
+    );
+  }
 
   return;
 }
@@ -223,11 +232,9 @@ if (error) {
   console.error(error);
 
   if (error.code === "23503") {
-    alert(
-      "ลบหมวดหมู่นี้ไม่ได้ เพราะยังมีสินค้าอยู่ในหมวดหมู่นี้"
-    );
+    alert("ลบหมวดหมู่นี้ไม่ได้ เพราะยังมีสินค้าอยู่ในหมวดหมู่นี้");
   } else {
-    alert("ลบหมวดหมู่ไม่สำเร็จ กรุณาลองใหม่");
+    alert(error.message || "ลบหมวดหมู่ไม่สำเร็จ กรุณาลองใหม่");
   }
 
   return;
@@ -265,6 +272,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
 
     <nav className="p-6 space-y-4">
       <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" />
+
       <Menu icon={<FaBox />} text="สินค้า" href="/products" />
 
       <Menu
@@ -274,18 +282,40 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
         href="/categories"
       />
 
-      <Menu icon={<FaShoppingCart />} text="การขาย" href="/sales" />
-      <Menu icon={<FaChartBar />} text="รายงาน" href="/reports" />
-      <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
+      <Menu
+        icon={<FaShoppingCart />}
+        text="การขาย"
+        href="/sales"
+      />
+
+      <Menu
+        icon={<FaHistory />}
+        text="ประวัติสต๊อก"
+        href="/stock-movements"
+      />
+
+      <Menu
+        icon={<FaChartBar />}
+        text="รายงาน"
+        href="/reports"
+      />
+
+      <Menu
+        icon={<FaUsers />}
+        text="ผู้ใช้งาน"
+        href="/users"
+      />
+
       <LogoutButton />
     </nav>
   </aside>
 
   <main className="flex-1 min-w-0 p-6 xl:p-10">
     <div className="flex justify-end mb-6">
-  <AccountHeader />
-</div>
-    <div className="flex flex-col xl:flex-row xl:justify-between xl:items-center gap-6 mb-10">
+      <AccountHeader />
+    </div>
+
+    <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-6 mb-10">
       <div>
         <h1 className="text-4xl font-bold text-gray-900">
           หมวดหมู่สินค้า
@@ -298,6 +328,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
 
       <div className="flex flex-wrap gap-4">
         <button
+          type="button"
           onClick={handleRefresh}
           disabled={isRefreshing}
           className="bg-white border px-6 py-4 rounded-xl flex items-center gap-2 text-gray-800 disabled:opacity-60"
@@ -307,6 +338,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
         </button>
 
         <button
+          type="button"
           onClick={openAddModal}
           className="bg-red-600 text-white px-6 py-4 rounded-xl flex items-center gap-3 shadow-lg hover:bg-red-700"
         >
@@ -316,8 +348,8 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
       </div>
     </div>
 
-    <div className="bg-white rounded-3xl shadow-sm border p-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+    <section className="bg-white rounded-3xl shadow-sm border p-6">
+      <div className="flex flex-col gap-4 mb-6 md:flex-row md:items-center md:justify-between">
         <p className="text-gray-500">
           ทั้งหมด {filteredCategories.length} หมวดหมู่
         </p>
@@ -329,7 +361,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
             value={keyword}
             onChange={(event) => setKeyword(event.target.value)}
             placeholder="ค้นหาหมวดหมู่..."
-            className="w-full border rounded-xl py-3 pl-11 pr-4 text-gray-800 outline-none"
+            className="w-full border rounded-xl py-3 pl-11 pr-4 text-gray-800 outline-none focus:border-red-500"
           />
         </div>
       </div>
@@ -377,22 +409,26 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
                     </span>
                   </td>
 
-                  <td className="p-6 flex gap-3">
-                    <button
-                      onClick={() => openEditModal(item)}
-                      className="border rounded-xl p-3 hover:bg-gray-100"
-                      title="แก้ไขหมวดหมู่"
-                    >
-                      <FaEdit />
-                    </button>
+                  <td className="p-6">
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openEditModal(item)}
+                        className="border rounded-xl p-3 hover:bg-gray-100"
+                        title="แก้ไขหมวดหมู่"
+                      >
+                        <FaEdit />
+                      </button>
 
-                    <button
-                      onClick={() => handleDeleteCategory(item)}
-                      className="border rounded-xl p-3 text-red-600 hover:bg-red-50"
-                      title="ลบหมวดหมู่"
-                    >
-                      <FaTrash />
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCategory(item)}
+                        className="border rounded-xl p-3 text-red-600 hover:bg-red-50"
+                        title="ลบหมวดหมู่"
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -409,7 +445,7 @@ return ( <div className="min-h-screen bg-[#f8f9fb] flex"> <aside className="w-[3
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
   </main>
 
   {showModal && (
@@ -520,7 +556,7 @@ function Menu({ icon, text, href, active }) {
 return (
 <Link
 href={href}
-className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl ${
+className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl whitespace-nowrap ${
         active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
       }`}
 > <span className="text-xl">{icon}</span> <span>{text}</span> </Link>

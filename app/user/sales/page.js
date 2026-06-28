@@ -1,6 +1,7 @@
 "use client";
 
 import AccountHeader from "../../components/AccountHeader";
+import BarcodeScanBox from "../../components/BarcodeScanBox";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "../../lib/supabase";
@@ -183,46 +184,44 @@ subtotal
 const grandTotal = Math.max(0, subtotal - globalDiscountAmount);
 
 function addProduct(product) {
-if (product.stock <= 0) {
-alert(`สินค้า "${product.name}" หมดสต็อก`);
-return;
-}
-
-
-setCart((previous) => {
-  const exists = previous.find((item) => item.productId === product.id);
-
-  if (exists) {
-    return previous.map((item) =>
-      item.productId === product.id
-        ? {
-            ...item,
-            quantity: Math.min(item.quantity + 1, item.stock),
-          }
-        : item
-    );
+  if (!product || product.stock <= 0) {
+    alert(`สินค้า "${product?.name || "-"}" หมดสต็อก`);
+    return false;
   }
 
-  return [
-    ...previous,
-    {
-      productId: product.id,
-      code: product.code,
-      barcode: product.barcode,
-      name: product.name,
-      category: product.category,
-      stock: product.stock,
-      unit: product.unit,
-      quantity: 1,
-      price: product.price,
-      discount: 0,
-    },
-  ];
-});
+  setCart((previous) => {
+    const exists = previous.find((item) => item.productId === product.id);
 
-setProductSearch("");
+    if (exists) {
+      return previous.map((item) =>
+        item.productId === product.id
+          ? {
+              ...item,
+              quantity: Math.min(item.quantity + 1, item.stock),
+            }
+          : item
+      );
+    }
 
+    return [
+      ...previous,
+      {
+        productId: product.id,
+        code: product.code,
+        barcode: product.barcode,
+        name: product.name,
+        category: product.category,
+        stock: product.stock,
+        unit: product.unit,
+        quantity: 1,
+        price: product.price,
+        discount: 0,
+      },
+    ];
+  });
 
+  setProductSearch("");
+  return true;
 }
 
 function addProductFromSearch() {
@@ -399,10 +398,9 @@ setIsSaving(true);
 const currentSaleNumber = saleNumber;
 const cartSnapshot = cart.map((item) => ({ ...item }));
 
-const { error } = await supabase.rpc("create_sale", {
+const { error } = await supabase.rpc("create_user_sale", {
   p_sale_number: currentSaleNumber,
   p_sale_date: saleDate,
-  p_seller_name: "User",
   p_note: note.trim(),
   p_discount: globalDiscountAmount,
   p_items: cart.map((item) => ({
@@ -632,7 +630,11 @@ return ( <div className="min-h-screen flex bg-[#f8f9fb]"> <aside className="w-[3
 
         <p className="text-sm text-gray-500 mt-3">
           ใช้เครื่องสแกนบาร์โค้ดยิงที่ช่องนี้ แล้วกด Enter ได้ทันที
-        </p>
+        </p><BarcodeScanBox
+  products={products}
+  onAddProduct={addProduct}
+  disabled={isSaving || isLoadingProducts}
+/>
 
         <div className="mt-7">
           <h3 className="font-bold text-xl text-gray-900 mb-4">

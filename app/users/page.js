@@ -5,6 +5,7 @@ import Link from "next/link";
 import { supabase } from "../lib/supabase";
 import LogoutButton from "../components/LogoutButton";
 import AccountHeader from "../components/AccountHeader";
+
 import {
   FaHome,
   FaBox,
@@ -12,6 +13,7 @@ import {
   FaShoppingCart,
   FaUsers,
   FaChartBar,
+  FaHistory,
   FaPlus,
   FaEdit,
   FaTrash,
@@ -101,7 +103,7 @@ export default function UsersPage() {
   }
 
   useEffect(() => {
-    loadUsers();
+    void loadUsers();
   }, []);
 
   const filteredUsers = useMemo(() => {
@@ -131,8 +133,14 @@ export default function UsersPage() {
   }, [users, keyword, filter]);
 
   const activeCount = users.filter((user) => user.is_active).length;
-  const inactiveCount = users.filter((user) => !user.is_active).length;
-  const adminCount = users.filter((user) => user.role === "admin").length;
+
+  const inactiveCount = users.filter(
+    (user) => !user.is_active
+  ).length;
+
+  const adminCount = users.filter(
+    (user) => user.role === "admin"
+  ).length;
 
   function openAddModal() {
     setModalMode("add");
@@ -271,21 +279,52 @@ export default function UsersPage() {
       <aside className="w-[300px] shrink-0 bg-[#1f2633] text-white rounded-r-[45px] overflow-hidden">
         <div className="bg-red-600 p-8 rounded-br-[45px]">
           <div className="text-3xl">🥤</div>
-          <h2 className="font-bold mt-3">ระบบบริหารจัดการ</h2>
-          <p className="text-sm">ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</p>
+
+          <h2 className="font-bold mt-3">
+            ระบบบริหารจัดการ
+          </h2>
+
+          <p className="text-sm">
+            ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+          </p>
         </div>
 
         <nav className="p-6 space-y-4">
           <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" />
+
           <Menu icon={<FaBox />} text="สินค้า" href="/products" />
+
           <Menu
             icon={<FaThLarge />}
             text="หมวดหมู่สินค้า"
             href="/categories"
           />
-          <Menu icon={<FaShoppingCart />} text="การขาย" href="/sales" />
-          <Menu icon={<FaChartBar />} text="รายงาน" href="/reports" />
-          <Menu active icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
+
+          <Menu
+            icon={<FaShoppingCart />}
+            text="การขาย"
+            href="/sales"
+          />
+
+          <Menu
+            icon={<FaHistory />}
+            text="ประวัติสต๊อก"
+            href="/stock-movements"
+          />
+
+          <Menu
+            icon={<FaChartBar />}
+            text="รายงาน"
+            href="/reports"
+          />
+
+          <Menu
+            active
+            icon={<FaUsers />}
+            text="ผู้ใช้งาน"
+            href="/users"
+          />
+
           <LogoutButton />
         </nav>
       </aside>
@@ -349,16 +388,19 @@ export default function UsersPage() {
             value={`${users.length} คน`}
             color="red"
           />
+
           <Summary
             title="ใช้งานอยู่"
             value={`${activeCount} คน`}
             color="green"
           />
+
           <Summary
             title="ไม่ใช้งาน"
             value={`${inactiveCount} คน`}
             color="orange"
           />
+
           <Summary
             title="สิทธิ์ Admin"
             value={`${adminCount} คน`}
@@ -366,7 +408,7 @@ export default function UsersPage() {
           />
         </div>
 
-        <div className="bg-white rounded-3xl border shadow-sm p-6">
+        <section className="bg-white rounded-3xl border shadow-sm p-6">
           <div className="flex flex-col xl:flex-row xl:justify-between gap-4 mb-6">
             <div className="relative w-full xl:w-[520px]">
               <FaSearch className="absolute left-4 top-4 text-gray-400" />
@@ -375,12 +417,13 @@ export default function UsersPage() {
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
                 placeholder="ค้นหาชื่อ, อีเมล, รหัสพนักงาน หรือเบอร์โทร"
-                className="w-full border rounded-xl pl-12 pr-5 py-3 text-gray-800 outline-none"
+                className="w-full border rounded-xl pl-12 pr-5 py-3 text-gray-800 outline-none focus:border-red-500"
               />
             </div>
 
             <div className="flex gap-3">
               <button
+                type="button"
                 onClick={handleRefresh}
                 disabled={isRefreshing}
                 className="border px-5 py-3 rounded-xl flex items-center gap-2 text-gray-700 disabled:opacity-60"
@@ -390,6 +433,7 @@ export default function UsersPage() {
               </button>
 
               <button
+                type="button"
                 onClick={openAddModal}
                 className="bg-red-600 text-white px-6 py-3 rounded-xl flex items-center gap-2"
               >
@@ -421,13 +465,26 @@ export default function UsersPage() {
                   filteredUsers.map((user, index) => (
                     <tr key={user.id} className="border-b text-gray-800">
                       <td className="p-4">{index + 1}</td>
+
                       <td className="p-4 font-semibold">
                         {user.employee_code || "-"}
                       </td>
-                      <td className="p-4">{user.display_name || "-"}</td>
-                      <td className="p-4">{user.position || "-"}</td>
-                      <td className="p-4">{user.phone || "-"}</td>
-                      <td className="p-4">{user.email || "-"}</td>
+
+                      <td className="p-4">
+                        {user.display_name || "-"}
+                      </td>
+
+                      <td className="p-4">
+                        {user.position || "-"}
+                      </td>
+
+                      <td className="p-4">
+                        {user.phone || "-"}
+                      </td>
+
+                      <td className="p-4">
+                        {user.email || "-"}
+                      </td>
 
                       <td className="p-4">
                         <span className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-sm">
@@ -447,24 +504,30 @@ export default function UsersPage() {
                         </span>
                       </td>
 
-                      <td className="p-4">{formatDate(user.created_at)}</td>
+                      <td className="p-4">
+                        {formatDate(user.created_at)}
+                      </td>
 
-                      <td className="p-4 flex gap-3">
-                        <button
-                          onClick={() => openEditModal(user)}
-                          className="border rounded-lg p-3 hover:bg-gray-100"
-                          title="แก้ไข"
-                        >
-                          <FaEdit />
-                        </button>
+                      <td className="p-4">
+                        <div className="flex gap-3">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(user)}
+                            className="border rounded-lg p-3 hover:bg-gray-100"
+                            title="แก้ไข"
+                          >
+                            <FaEdit />
+                          </button>
 
-                        <button
-                          onClick={() => handleDelete(user)}
-                          className="border rounded-lg p-3 text-red-600 hover:bg-red-50"
-                          title="ลบ"
-                        >
-                          <FaTrash />
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(user)}
+                            className="border rounded-lg p-3 text-red-600 hover:bg-red-50"
+                            title="ลบ"
+                          >
+                            <FaTrash />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -478,7 +541,7 @@ export default function UsersPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
       </main>
 
       {showModal && (
@@ -568,7 +631,7 @@ export default function UsersPage() {
                   name="role"
                   value={formData.role}
                   onChange={handleChange}
-                  className="w-full border rounded-xl px-4 py-3 text-gray-800"
+                  className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
                 >
                   <option value="user">User</option>
                   <option value="admin">Admin</option>
@@ -632,6 +695,7 @@ function Menu({ icon, text, href, active }) {
 function FilterButton({ text, active, onClick }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`px-5 py-3 rounded-xl ${
         active ? "bg-red-600 text-white" : "bg-white border text-gray-700"
@@ -679,8 +743,14 @@ function Summary({ title, value, color }) {
   return (
     <div className="bg-white rounded-3xl border shadow-sm p-6">
       <div className={`w-14 h-14 rounded-2xl mb-4 ${colors[color]}`} />
-      <p className="font-bold text-gray-800">{title}</p>
-      <h2 className="text-3xl font-bold mt-2 text-gray-900">{value}</h2>
+
+      <p className="font-bold text-gray-800">
+        {title}
+      </p>
+
+      <h2 className="text-3xl font-bold mt-2 text-gray-900">
+        {value}
+      </h2>
     </div>
   );
 }
