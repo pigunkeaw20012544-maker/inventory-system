@@ -3,11 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Barcode from "react-barcode";
+
 import {
   FaBarcode,
   FaBox,
+  FaBoxOpen,
+  FaBoxes,
   FaChartBar,
+  FaCheckCircle,
   FaEdit,
+  FaExclamationTriangle,
   FaHistory,
   FaHome,
   FaPlus,
@@ -35,7 +40,6 @@ const emptyForm = {
   price: "",
   stock: "",
   unit: "ชิ้น",
-  status: "มีสินค้า",
 };
 
 function getCategoryName(category) {
@@ -55,6 +59,13 @@ function getStatusFromStock(stock) {
   return "มีสินค้า";
 }
 
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("th-TH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -67,12 +78,19 @@ export default function ProductsPage() {
   const [showProductModal, setShowProductModal] = useState(false);
   const [modalMode, setModalMode] = useState("add");
   const [editingProduct, setEditingProduct] = useState(null);
+
   const [formData, setFormData] = useState(emptyForm);
   const [formError, setFormError] = useState("");
+
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pageError, setPageError] = useState("");
 
   async function loadProducts() {
+    setIsLoading(true);
+    setPageError("");
+
     const { data, error } = await supabase
       .from("products")
       .select(`
@@ -90,8 +108,12 @@ export default function ProductsPage() {
       .order("id", { ascending: true });
 
     if (error) {
-      console.error("โหลดสินค้าไม่สำเร็จ:", error);
-      alert(error.message || "ไม่สามารถโหลดข้อมูลสินค้าจากฐานข้อมูลได้");
+      console.error(error);
+      setProducts([]);
+      setPageError(
+        error.message || "ไม่สามารถโหลดข้อมูลสินค้าจากฐานข้อมูลได้"
+      );
+      setIsLoading(false);
       return;
     }
 
@@ -102,13 +124,14 @@ export default function ProductsPage() {
       name: product.name || "-",
       categoryId: product.category_id,
       category: getCategoryName(product.category),
-      price: Number(product.price || 0).toFixed(2),
+      price: Number(product.price || 0),
       stock: Number(product.stock || 0),
       unit: product.unit || "ชิ้น",
       status: product.status || getStatusFromStock(product.stock),
     }));
 
     setProducts(mappedProducts);
+    setIsLoading(false);
   }
 
   async function loadCategories() {
@@ -118,7 +141,7 @@ export default function ProductsPage() {
       .order("name", { ascending: true });
 
     if (error) {
-      console.error("โหลดหมวดหมู่ไม่สำเร็จ:", error);
+      console.error(error);
       return;
     }
 
@@ -133,12 +156,20 @@ export default function ProductsPage() {
       .channel("admin-products-live")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "products" },
+        {
+          event: "*",
+          schema: "public",
+          table: "products",
+        },
         () => void loadProducts()
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "categories" },
+        {
+          event: "*",
+          schema: "public",
+          table: "categories",
+        },
         () => void loadCategories()
       )
       .subscribe();
@@ -160,22 +191,53 @@ export default function ProductsPage() {
         product.name,
         product.category,
         product.status,
-      ].some((value) => String(value || "").toLowerCase().includes(search))
+      ].some((value) =>
+        String(value || "").toLowerCase().includes(search)
+      )
     );
   }, [keyword, products]);
 
-  const lowStockCount = useMemo(() => {
+  const outOfStockProducts = useMemo(() => {
+    return products.filter((product) => Number(product.stock) <= 0);
+  }, [products]);
+
+  const lowStockProducts = useMemo(() => {
     return products.filter(
       (product) =>
-        product.status === "ใกล้หมด" ||
-        product.status === "หมด" ||
-        Number(product.stock) < 10
-    ).length;
+        Number(product.stock) > 0 && Number(product.stock) < 10
+    );
+  }, [products]);
+
+  const totalStock = useMemo(() => {
+    return products.reduce(
+      (total, product) => total + Number(product.stock || 0),
+      0
+    );
+  }, [products]);
+
+  const readyProductCount = useMemo(() => {
+    return products.filter((product) => Number(product.stock) > 0).length;
+  }, [products]);
+
+  const lowStockCount = useMemo(() => {
+    return products.filter((product) => Number(product.stock) < 10).length;
+  }, [products]);
+
+  const inventoryValue = useMemo(() => {
+    return products.reduce(
+      (total, product) =>
+        total + Number(product.price || 0) * Number(product.stock || 0),
+      0
+    );
   }, [products]);
 
   function handleBarcodeProductFound(product) {
-    setScannedProduct(product);
-    setKeyword(product.barcode || product.code);
+    const currentProduct =
+      products.find((item) => String(item.id) === String(product.id)) ||
+      product;
+
+    setScannedProduct(currentProduct);
+    setKeyword(currentProduct.barcode || currentProduct.code || "");
   }
 
   function openBarcodeModal(product) {
@@ -208,10 +270,9 @@ export default function ProductsPage() {
       barcode: product.barcode || "",
       name: product.name,
       category_id: String(product.categoryId || ""),
-      price: product.price,
+      price: String(product.price || ""),
       stock: String(product.stock),
       unit: product.unit || "ชิ้น",
-      status: product.status || getStatusFromStock(product.stock),
     });
 
     setShowProductModal(true);
@@ -258,12 +319,15 @@ export default function ProductsPage() {
     }
 
     if (
+      !Number.isFinite(categoryId) ||
       !Number.isFinite(price) ||
+      !Number.isInteger(stock) ||
       price < 0 ||
-      !Number.isFinite(stock) ||
       stock < 0
     ) {
-      setFormError("ราคาขายและจำนวนสต็อกต้องเป็นตัวเลข 0 หรือมากกว่า");
+      setFormError(
+        "ราคาขายต้องเป็นตัวเลข และจำนวนสต๊อกต้องเป็นจำนวนเต็ม 0 หรือมากกว่า"
+      );
       return;
     }
 
@@ -275,7 +339,7 @@ export default function ProductsPage() {
       price,
       stock,
       unit: formData.unit.trim() || "ชิ้น",
-      status: formData.status,
+      status: getStatusFromStock(stock),
     };
 
     setIsSaving(true);
@@ -300,7 +364,7 @@ export default function ProductsPage() {
       if (error.code === "23505") {
         setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
       } else {
-        setFormError(error.message || "บันทึกสินค้าไม่สำเร็จ กรุณาลองใหม่");
+        setFormError(error.message || "บันทึกสินค้าไม่สำเร็จ");
       }
 
       return;
@@ -309,7 +373,11 @@ export default function ProductsPage() {
     await loadProducts();
     closeProductModal();
 
-    alert(modalMode === "add" ? "เพิ่มสินค้าสำเร็จ" : "แก้ไขสินค้าสำเร็จ");
+    alert(
+      modalMode === "add"
+        ? "เพิ่มสินค้าสำเร็จ"
+        : "แก้ไขสินค้าสำเร็จ"
+    );
   }
 
   async function handleDeleteProduct(product) {
@@ -326,7 +394,7 @@ export default function ProductsPage() {
 
     if (error) {
       console.error(error);
-      alert(error.message || "ลบสินค้าไม่สำเร็จ กรุณาลองใหม่");
+      alert(error.message || "ลบสินค้าไม่สำเร็จ");
       return;
     }
 
@@ -345,17 +413,31 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8f9fb] flex">
-      <aside className="w-[300px] shrink-0 bg-[#1f2633] text-white rounded-r-[45px] overflow-hidden">
-        <div className="bg-red-600 p-8 rounded-br-[45px]">
-          <div className="text-3xl">🥤</div>
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
+        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
+              🥤
+            </div>
 
-          <h2 className="font-bold mt-3">ระบบบริหารจัดการ</h2>
+            <div>
+              <h2 className="text-lg font-bold">
+                ระบบบริหารจัดการ
+              </h2>
 
-          <p className="text-sm">ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</p>
+              <p className="text-xs text-white/80">
+                ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+              </p>
+            </div>
+          </div>
         </div>
 
-        <nav className="p-6 space-y-4">
+        <nav className="space-y-2 p-5">
+          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+            เมนูหลัก
+          </p>
+
           <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" />
 
           <Menu active icon={<FaBox />} text="สินค้า" href="/products" />
@@ -366,7 +448,11 @@ export default function ProductsPage() {
             href="/categories"
           />
 
-          <Menu icon={<FaShoppingCart />} text="การขาย" href="/sales" />
+          <Menu
+            icon={<FaShoppingCart />}
+            text="การขาย"
+            href="/sales"
+          />
 
           <Menu
             icon={<FaHistory />}
@@ -378,88 +464,164 @@ export default function ProductsPage() {
 
           <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
 
-          <LogoutButton />
+          <div className="pt-5">
+            <LogoutButton />
+          </div>
         </nav>
       </aside>
 
-      <main className="flex-1 min-w-0 p-6 xl:p-10">
-        <div className="flex justify-end mb-6">
-          <AccountHeader />
-        </div>
-
-        <div className="flex flex-col 2xl:flex-row 2xl:justify-between 2xl:items-center gap-6 mb-8">
+      <main className="min-w-0 flex-1 p-6 xl:p-10">
+        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">สินค้า</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold text-slate-900">
+                จัดการสินค้า
+              </h1>
 
-            <p className="text-gray-500 mt-2">Products &gt; สินค้า</p>
+              <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
+                Admin
+              </span>
+            </div>
+
+            <p className="mt-2 text-slate-500">
+              เพิ่ม แก้ไข ค้นหา และตรวจสอบสินค้าในคลัง
+            </p>
           </div>
 
-          <div className="flex flex-wrap gap-4 items-center">
-            <button
-              type="button"
-              onClick={() => openBarcodeModal()}
-              className="bg-slate-800 text-white px-6 py-4 rounded-xl flex items-center gap-2 shadow"
-            >
-              <FaBarcode />
-              สร้างบาร์โค้ด
-            </button>
+          <AccountHeader />
+        </header>
 
-            <button
-              type="button"
-              onClick={openAddModal}
-              className="bg-red-600 text-white px-6 py-4 rounded-xl flex items-center gap-2 shadow"
-            >
-              <FaPlus />
-              เพิ่มสินค้า
-            </button>
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => openBarcodeModal()}
+                className="flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-3 text-white hover:bg-slate-700"
+              >
+                <FaBarcode />
+                สร้างบาร์โค้ด
+              </button>
 
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              className="bg-white border px-6 py-4 rounded-xl flex items-center gap-2 shadow-sm text-gray-800 disabled:opacity-60"
-            >
-              <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
-              {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
-            </button>
+              <button
+                type="button"
+                onClick={openAddModal}
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700"
+              >
+                <FaPlus />
+                เพิ่มสินค้า
+              </button>
 
-            <div className="relative">
-              <FaSearch className="absolute left-4 top-5 text-gray-400" />
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
+                {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรช"}
+              </button>
+            </div>
+
+            <div className="relative w-full 2xl:w-[380px]">
+              <FaSearch className="absolute left-4 top-4 text-slate-400" />
 
               <input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
-                placeholder="ค้นหาด้วยชื่อสินค้า / รหัสสินค้า"
-                className="bg-white border rounded-xl pl-12 pr-5 py-4 w-full sm:w-80 outline-none text-gray-800"
+                placeholder="ค้นหาชื่อสินค้า / รหัส / บาร์โค้ด"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-slate-800 outline-none focus:border-red-500 focus:bg-white"
               />
             </div>
           </div>
-        </div>
+        </section>
 
-        <BarcodeProductSearch
-          products={products}
-          onProductFound={handleBarcodeProductFound}
-        />
+        <section className="mt-6 rounded-3xl border border-red-100 bg-gradient-to-r from-red-50 to-white p-5">
+          <div className="mb-4">
+            <h2 className="font-bold text-slate-900">
+              ค้นหาด้วยเครื่องยิงบาร์โค้ด
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              รองรับเครื่องยิงบาร์โค้ด USB และ Bluetooth
+            </p>
+          </div>
+
+          <BarcodeProductSearch
+            products={products}
+            onProductFound={handleBarcodeProductFound}
+          />
+        </section>
+
+        {outOfStockProducts.length > 0 && (
+          <section className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5">
+            <div className="flex gap-3">
+              <FaExclamationTriangle className="mt-1 text-xl text-red-600" />
+
+              <div>
+                <h2 className="font-bold text-red-700">
+                  สินค้าหมด {outOfStockProducts.length} รายการ
+                </h2>
+
+                <p className="mt-1 text-sm text-red-600">
+                  {outOfStockProducts
+                    .slice(0, 5)
+                    .map((product) => product.name)
+                    .join(", ")}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {lowStockProducts.length > 0 && (
+          <section className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 p-5">
+            <div className="flex gap-3">
+              <FaExclamationTriangle className="mt-1 text-xl text-orange-600" />
+
+              <div>
+                <h2 className="font-bold text-orange-700">
+                  สินค้าใกล้หมด {lowStockProducts.length} รายการ
+                </h2>
+
+                <p className="mt-1 text-sm text-orange-600">
+                  {lowStockProducts
+                    .slice(0, 5)
+                    .map(
+                      (product) =>
+                        `${product.name} (${product.stock} ${product.unit})`
+                    )
+                    .join(", ")}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
 
         {scannedProduct && (
-          <section className="mb-8 rounded-2xl border border-green-200 bg-green-50 p-5">
-            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-              <div>
-                <p className="text-lg font-bold text-gray-900">
-                  พบสินค้า: {scannedProduct.name}
-                </p>
+          <section className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex items-start gap-3">
+                <div className="mt-1 rounded-xl bg-emerald-100 p-3 text-emerald-600">
+                  <FaCheckCircle />
+                </div>
 
-                <p className="mt-1 text-sm text-gray-600">
-                  รหัสสินค้า: {scannedProduct.code} · บาร์โค้ด:{" "}
-                  {scannedProduct.barcode || "-"} · คงเหลือ{" "}
-                  {scannedProduct.stock} {scannedProduct.unit}
-                </p>
+                <div>
+                  <p className="font-bold text-slate-900">
+                    พบสินค้า: {scannedProduct.name}
+                  </p>
+
+                  <p className="mt-1 text-sm text-slate-600">
+                    รหัสสินค้า {scannedProduct.code} · คงเหลือ{" "}
+                    {scannedProduct.stock} {scannedProduct.unit}
+                  </p>
+                </div>
               </div>
 
               <button
                 type="button"
                 onClick={() => openBarcodeModal(scannedProduct)}
-                className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-slate-700"
+                className="rounded-xl border border-emerald-300 bg-white px-5 py-3 text-emerald-700 hover:bg-emerald-100"
               >
                 ดูบาร์โค้ดสินค้า
               </button>
@@ -467,94 +629,170 @@ export default function ProductsPage() {
           </section>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 mb-8">
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
           <StatCard
-            title="จำนวนสินค้าทั้งหมด"
+            title="สินค้าทั้งหมด"
             value={products.length.toLocaleString()}
-            unit="รายการ"
+            detail="รายการในระบบ"
+            icon={<FaBoxes />}
             color="red"
           />
 
           <StatCard
-            title="จำนวนหมวดหมู่"
-            value={categories.length.toLocaleString()}
-            unit="หมวดหมู่"
+            title="สินค้าพร้อมขาย"
+            value={readyProductCount.toLocaleString()}
+            detail={`คงเหลือรวม ${totalStock.toLocaleString()} ชิ้น`}
+            icon={<FaBoxOpen />}
             color="green"
           />
 
           <StatCard
             title="สินค้าใกล้หมด"
             value={lowStockCount.toLocaleString()}
-            unit="รายการ"
-            color="yellow"
+            detail="สต๊อกน้อยกว่า 10 ชิ้น"
+            icon={<FaExclamationTriangle />}
+            color="orange"
           />
 
           <StatCard
-            title="ยอดขายวันนี้"
-            value="฿ 28,450.00"
-            unit=""
-            color="green"
+            title="มูลค่าสต๊อก"
+            value={`฿ ${formatMoney(inventoryValue)}`}
+            detail={`มี ${categories.length} หมวดหมู่`}
+            icon={<FaBox />}
+            color="blue"
           />
-        </div>
+        </section>
 
-        <div className="bg-white rounded-3xl shadow-sm border p-6">
+        <section className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">
+                รายการสินค้า
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                แสดง {filteredProducts.length} จาก {products.length} รายการ
+              </p>
+            </div>
+
+            <p className="text-sm text-slate-500">
+              ใช้ปุ่มดินสอเพื่อแก้ไขสินค้า
+            </p>
+          </div>
+
+          {pageError && (
+            <div className="m-6 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+              <FaExclamationTriangle className="mt-1 shrink-0" />
+              <p>{pageError}</p>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1060px] text-sm">
+            <table className="w-full min-w-[1100px] text-sm">
               <thead>
-                <tr className="bg-gray-100 text-gray-700">
-                  <th className="p-4 text-left">#</th>
-                  <th className="p-4 text-left">รหัสสินค้า</th>
-                  <th className="p-4 text-left">ชื่อสินค้า</th>
-                  <th className="p-4 text-left">หมวดหมู่</th>
-                  <th className="p-4 text-left">ราคาขาย (บาท)</th>
-                  <th className="p-4 text-left">สต็อก</th>
-                  <th className="p-4 text-left">บาร์โค้ด</th>
-                  <th className="p-4 text-left">สถานะ</th>
-                  <th className="p-4 text-left">จัดการ</th>
+                <tr className="bg-slate-50 text-slate-600">
+                  <th className="px-6 py-4 text-left font-semibold">#</th>
+                  <th className="px-6 py-4 text-left font-semibold">
+                    รหัสสินค้า
+                  </th>
+                  <th className="px-6 py-4 text-left font-semibold">
+                    ชื่อสินค้า
+                  </th>
+                  <th className="px-6 py-4 text-left font-semibold">
+                    หมวดหมู่
+                  </th>
+                  <th className="px-6 py-4 text-right font-semibold">
+                    ราคาขาย
+                  </th>
+                  <th className="px-6 py-4 text-center font-semibold">
+                    สต๊อก
+                  </th>
+                  <th className="px-6 py-4 text-left font-semibold">
+                    สถานะ
+                  </th>
+                  <th className="px-6 py-4 text-center font-semibold">
+                    จัดการ
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {filteredProducts.length > 0 ? (
-                  filteredProducts.map((item, index) => (
-                    <tr key={item.id} className="border-b text-gray-800">
-                      <td className="p-4">{index + 1}</td>
-                      <td className="p-4">{item.code}</td>
-                      <td className="p-4">{item.name}</td>
-                      <td className="p-4">{item.category}</td>
-                      <td className="p-4">{item.price}</td>
+                {isLoading && (
+                  <tr>
+                    <td
+                      colSpan="8"
+                      className="px-6 py-14 text-center text-slate-500"
+                    >
+                      กำลังโหลดข้อมูลสินค้า...
+                    </td>
+                  </tr>
+                )}
 
-                      <td className="p-4">
-                        {item.stock} {item.unit}
+                {!isLoading &&
+                  filteredProducts.map((item, index) => (
+                    <tr
+                      key={item.id}
+                      className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
+                    >
+                      <td className="px-6 py-4 text-slate-400">
+                        {index + 1}
                       </td>
 
-                      <td className="p-4">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs">
-                            {item.barcode || "-"}
-                          </span>
+                      <td className="px-6 py-4">
+                        <span className="rounded-lg bg-slate-100 px-3 py-2 font-mono text-xs font-semibold text-slate-700">
+                          {item.code}
+                        </span>
+                      </td>
 
+                      <td className="px-6 py-4">
+                        <p className="font-semibold text-slate-900">
+                          {item.name}
+                        </p>
+
+                        <p className="mt-1 font-mono text-xs text-slate-400">
+                          {item.barcode || "ไม่มีบาร์โค้ด"}
+                        </p>
+                      </td>
+
+                      <td className="px-6 py-4">{item.category}</td>
+
+                      <td className="px-6 py-4 text-right font-medium">
+                        ฿ {formatMoney(item.price)}
+                      </td>
+
+                      <td className="px-6 py-4 text-center">
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
+                            Number(item.stock) <= 0
+                              ? "bg-red-100 text-red-600"
+                              : Number(item.stock) < 10
+                              ? "bg-orange-100 text-orange-600"
+                              : "bg-emerald-100 text-emerald-600"
+                          }`}
+                        >
+                          {item.stock} {item.unit}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4">
+                        <StatusBadge status={item.status} />
+                      </td>
+
+                      <td className="px-6 py-4">
+                        <div className="flex justify-center gap-2">
                           <button
                             type="button"
                             onClick={() => openBarcodeModal(item)}
-                            className="border border-slate-300 p-2 rounded-lg text-slate-700 hover:bg-slate-100"
+                            className="rounded-xl border border-slate-200 p-3 text-slate-600 hover:bg-slate-100"
                             title="ดูบาร์โค้ด"
                           >
                             <FaBarcode />
                           </button>
-                        </div>
-                      </td>
 
-                      <td className="p-4">
-                        <StatusBadge status={item.status} />
-                      </td>
-
-                      <td className="p-4">
-                        <div className="flex gap-3">
                           <button
                             type="button"
                             onClick={() => openEditModal(item)}
-                            className="border p-3 rounded-xl text-gray-700 hover:bg-gray-100"
+                            className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-600 hover:bg-blue-100"
                             title="แก้ไขสินค้า"
                           >
                             <FaEdit />
@@ -563,7 +801,7 @@ export default function ProductsPage() {
                           <button
                             type="button"
                             onClick={() => handleDeleteProduct(item)}
-                            className="border p-3 rounded-xl text-red-600 hover:bg-red-50"
+                            className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-600 hover:bg-red-100"
                             title="ลบสินค้า"
                           >
                             <FaTrash />
@@ -571,10 +809,14 @@ export default function ProductsPage() {
                         </div>
                       </td>
                     </tr>
-                  ))
-                ) : (
+                  ))}
+
+                {!isLoading && filteredProducts.length === 0 && (
                   <tr>
-                    <td colSpan="9" className="p-10 text-center text-gray-500">
+                    <td
+                      colSpan="8"
+                      className="px-6 py-14 text-center text-slate-500"
+                    >
                       ไม่พบสินค้าจากคำค้นหานี้
                     </td>
                   </tr>
@@ -582,35 +824,29 @@ export default function ProductsPage() {
               </tbody>
             </table>
           </div>
-
-          <div className="flex justify-between items-center mt-6">
-            <p className="text-gray-500">
-              แสดง {filteredProducts.length} รายการ
-            </p>
-          </div>
-        </div>
+        </section>
       </main>
 
       {showProductModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <form
             onSubmit={handleSaveProduct}
-            className="bg-white w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl p-7 md:p-8 shadow-2xl relative"
+            className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-7 shadow-2xl md:p-8"
           >
             <button
               type="button"
               onClick={closeProductModal}
-              className="absolute right-6 top-6 text-gray-500 hover:text-red-600"
+              className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
               <FaTimes className="text-xl" />
             </button>
 
-            <h2 className="text-2xl font-bold text-gray-900">
-              {modalMode === "add" ? "เพิ่มสินค้า" : "แก้ไขสินค้า"}
+            <h2 className="text-2xl font-bold text-slate-900">
+              {modalMode === "add" ? "เพิ่มสินค้าใหม่" : "แก้ไขสินค้า"}
             </h2>
 
-            <p className="text-gray-500 mt-1">
-              กรอกข้อมูลสินค้าแล้วกดบันทึก ระบบจะบันทึกลง Supabase
+            <p className="mt-1 text-slate-500">
+              กรอกข้อมูลให้ครบ แล้วกดบันทึกสินค้า
             </p>
 
             {formError && (
@@ -619,7 +855,7 @@ export default function ProductsPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
+            <div className="mt-7 grid grid-cols-1 gap-5 md:grid-cols-2">
               <InputField
                 label="รหัสสินค้า"
                 name="product_code"
@@ -645,7 +881,7 @@ export default function ProductsPage() {
               />
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
                   หมวดหมู่
                 </label>
 
@@ -653,7 +889,7 @@ export default function ProductsPage() {
                   name="category_id"
                   value={formData.category_id}
                   onChange={handleFormChange}
-                  className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
                 >
                   <option value="">-- เลือกหมวดหมู่ --</option>
 
@@ -677,7 +913,7 @@ export default function ProductsPage() {
               />
 
               <InputField
-                label="จำนวนสต็อก"
+                label="จำนวนสต๊อก"
                 name="stock"
                 type="number"
                 min="0"
@@ -696,28 +932,27 @@ export default function ProductsPage() {
               />
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
                   สถานะสินค้า
                 </label>
 
-                <select
-                  name="status"
-                  value={formData.status}
-                  onChange={handleFormChange}
-                  className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
-                >
-                  <option value="มีสินค้า">มีสินค้า</option>
-                  <option value="ใกล้หมด">ใกล้หมด</option>
-                  <option value="หมด">หมด</option>
-                </select>
+                <div className="flex h-[50px] items-center rounded-xl border border-slate-200 bg-slate-50 px-4">
+                  <StatusBadge
+                    status={getStatusFromStock(formData.stock)}
+                  />
+
+                  <span className="ml-3 text-sm text-slate-500">
+                    ระบบคำนวณจากจำนวนสต๊อกอัตโนมัติ
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 mt-8">
+            <div className="mt-8 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={closeProductModal}
-                className="border px-5 py-3 rounded-xl text-gray-700"
+                className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
               >
                 ยกเลิก
               </button>
@@ -725,7 +960,7 @@ export default function ProductsPage() {
               <button
                 type="submit"
                 disabled={isSaving}
-                className="bg-red-600 disabled:bg-red-300 text-white px-5 py-3 rounded-xl flex items-center gap-2"
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
               >
                 <FaSave />
                 {isSaving ? "กำลังบันทึก..." : "บันทึกสินค้า"}
@@ -736,54 +971,58 @@ export default function ProductsPage() {
       )}
 
       {showBarcodeModal && selectedProduct && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-8 shadow-2xl relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="relative w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl">
             <button
               type="button"
               onClick={() => setShowBarcodeModal(false)}
-              className="absolute right-6 top-6 text-gray-500 hover:text-red-600"
+              className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
               <FaTimes className="text-xl" />
             </button>
 
-            <h2 className="text-2xl font-bold text-gray-900">
+            <h2 className="text-2xl font-bold text-slate-900">
               สร้างบาร์โค้ดสินค้า
             </h2>
 
-            <p className="text-gray-500 mt-1">
-              เลือกสินค้าเพื่อสร้างและพิมพ์บาร์โค้ด
+            <p className="mt-1 text-slate-500">
+              เลือกสินค้า แล้วสามารถพิมพ์บาร์โค้ดได้
             </p>
 
             <select
-              value={selectedProduct.code}
+              value={String(selectedProduct.id)}
               onChange={(event) => {
                 const product = products.find(
-                  (item) => item.code === event.target.value
+                  (item) => String(item.id) === event.target.value
                 );
 
                 setSelectedProduct(product || null);
               }}
-              className="w-full mt-5 border rounded-xl p-4 text-gray-800 outline-none"
+              className="mt-6 w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
             >
               {products.map((product) => (
-                <option key={product.id} value={product.code}>
+                <option key={product.id} value={product.id}>
                   {product.code} - {product.name}
                 </option>
               ))}
             </select>
 
-            <div className="mt-6 border rounded-2xl bg-gray-50 p-6 text-center">
-              <p className="font-bold text-gray-900">
+            <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center">
+              <p className="text-lg font-bold text-slate-900">
                 {selectedProduct.name}
               </p>
 
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="mt-1 text-sm text-slate-500">
                 รหัสสินค้า: {selectedProduct.code}
               </p>
 
-              <div className="bg-white mt-5 p-5 rounded-xl inline-block">
+              <div className="mt-5 inline-block rounded-xl bg-white p-5 shadow-sm">
                 <Barcode
-                  value={selectedProduct.barcode || selectedProduct.code}
+                  value={
+                    selectedProduct.barcode ||
+                    selectedProduct.code ||
+                    "NO-CODE"
+                  }
                   format="CODE128"
                   width={2}
                   height={90}
@@ -793,16 +1032,16 @@ export default function ProductsPage() {
                 />
               </div>
 
-              <p className="text-sm text-gray-500 mt-4">
-                Barcode: {selectedProduct.barcode || "-"}
+              <p className="mt-4 font-mono text-sm text-slate-500">
+                {selectedProduct.barcode || selectedProduct.code}
               </p>
             </div>
 
-            <div className="flex justify-end gap-3 mt-6">
+            <div className="mt-7 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setShowBarcodeModal(false)}
-                className="border px-5 py-3 rounded-xl text-gray-700"
+                className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
               >
                 ปิด
               </button>
@@ -810,7 +1049,7 @@ export default function ProductsPage() {
               <button
                 type="button"
                 onClick={() => window.print()}
-                className="bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2"
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700"
               >
                 <FaPrint />
                 พิมพ์บาร์โค้ด
@@ -827,12 +1066,14 @@ function Menu({ icon, text, href, active }) {
   return (
     <Link
       href={href}
-      className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl whitespace-nowrap ${
-        active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
+      className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
+        active
+          ? "bg-red-600 text-white shadow-lg"
+          : "text-slate-200 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <span className="text-xl">{icon}</span>
-      <span>{text}</span>
+      <span className="text-lg">{icon}</span>
+      <span className="font-medium">{text}</span>
     </Link>
   );
 }
@@ -849,7 +1090,7 @@ function InputField({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-2">
+      <label className="mb-2 block text-sm font-medium text-slate-700">
         {label}
       </label>
 
@@ -861,7 +1102,7 @@ function InputField({
         placeholder={placeholder}
         min={min}
         step={step}
-        className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
       />
     </div>
   );
@@ -869,16 +1110,16 @@ function InputField({
 
 function StatusBadge({ status }) {
   const statusStyle = {
-    มีสินค้า: "bg-green-100 text-green-600",
-    พร้อมขาย: "bg-green-100 text-green-600",
-    ใกล้หมด: "bg-orange-100 text-orange-600",
-    หมด: "bg-red-100 text-red-600",
+    มีสินค้า: "bg-emerald-100 text-emerald-700",
+    พร้อมขาย: "bg-emerald-100 text-emerald-700",
+    ใกล้หมด: "bg-orange-100 text-orange-700",
+    หมด: "bg-red-100 text-red-700",
   };
 
   return (
     <span
-      className={`inline-flex whitespace-nowrap px-4 py-2 rounded-full text-sm ${
-        statusStyle[status] || "bg-gray-100 text-gray-600"
+      className={`inline-flex whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${
+        statusStyle[status] || "bg-slate-100 text-slate-600"
       }`}
     >
       {status}
@@ -886,43 +1127,48 @@ function StatusBadge({ status }) {
   );
 }
 
-function StatCard({ title, value, unit, color }) {
-  const colorStyle = {
-    red: "bg-red-600 text-red-600",
-    green: "bg-green-100 text-green-600",
-    yellow: "bg-yellow-100 text-yellow-500",
+function StatCard({ title, value, detail, icon, color }) {
+  const styles = {
+    red: {
+      icon: "bg-red-100 text-red-600",
+      line: "bg-red-500",
+    },
+    green: {
+      icon: "bg-emerald-100 text-emerald-600",
+      line: "bg-emerald-500",
+    },
+    orange: {
+      icon: "bg-orange-100 text-orange-600",
+      line: "bg-orange-500",
+    },
+    blue: {
+      icon: "bg-blue-100 text-blue-600",
+      line: "bg-blue-500",
+    },
   };
 
-  const [bg, text] = colorStyle[color].split(" ");
+  const style = styles[color] || styles.blue;
 
   return (
-    <div
-      className={`${
-        color === "red" ? "bg-red-600 text-white" : "bg-white"
-      } rounded-3xl shadow-sm border p-6`}
-    >
-      <div
-        className={`w-16 h-16 ${
-          color === "red" ? "bg-red-500" : bg
-        } rounded-full mb-4`}
-      />
+    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`absolute left-0 top-0 h-1 w-full ${style.line}`} />
 
-      <p className={color === "red" ? "text-white" : "text-gray-800"}>
-        {title}
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
 
-      <div className="flex items-end gap-2 mt-2">
-        <h2
-          className={`text-3xl font-bold ${
-            color === "red" ? "text-white" : text
-          }`}
+          <h2 className="mt-3 text-2xl font-bold text-slate-900">
+            {value}
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">{detail}</p>
+        </div>
+
+        <div
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${style.icon}`}
         >
-          {value}
-        </h2>
-
-        <span className={color === "red" ? "text-white" : "text-gray-500"}>
-          {unit}
-        </span>
+          {icon}
+        </div>
       </div>
     </div>
   );

@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { supabase } from "../../lib/supabase";
-import LogoutButton from "../../components/LogoutButton";
+
 import AccountHeader from "../../components/AccountHeader";
+import LogoutButton from "../../components/LogoutButton";
+import { supabase } from "../../lib/supabase";
 
 import {
   FaBarcode,
@@ -26,6 +27,12 @@ function normalizeValue(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function toNumber(value) {
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : 0;
+}
+
 function getCategoryName(category) {
   if (Array.isArray(category)) {
     return category[0]?.name || "-";
@@ -34,17 +41,34 @@ function getCategoryName(category) {
   return category?.name || "-";
 }
 
-function getStatusFromStock(stock) {
-  const quantity = Number(stock || 0);
+function getStockInfo(stock) {
+  const quantity = toNumber(stock);
 
-  if (quantity <= 0) return "หมด";
-  if (quantity < 10) return "ใกล้หมด";
+  if (quantity <= 0) {
+    return {
+      label: "หมด",
+      badge: "bg-red-100 text-red-700",
+      text: "text-red-600",
+    };
+  }
 
-  return "มีสินค้า";
+  if (quantity < 10) {
+    return {
+      label: "ใกล้หมด",
+      badge: "bg-orange-100 text-orange-700",
+      text: "text-orange-600",
+    };
+  }
+
+  return {
+    label: "มีสินค้า",
+    badge: "bg-emerald-100 text-emerald-700",
+    text: "text-emerald-600",
+  };
 }
 
 function formatMoney(value) {
-  return Number(value || 0).toLocaleString("th-TH", {
+  return toNumber(value).toLocaleString("th-TH", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
@@ -87,11 +111,13 @@ export default function UserProductsPage() {
   const [receiveNote, setReceiveNote] = useState("");
   const [receiveError, setReceiveError] = useState("");
 
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isReceiving, setIsReceiving] = useState(false);
+  const [pageError, setPageError] = useState("");
 
   async function loadProducts() {
     setIsLoading(true);
+    setPageError("");
 
     const { data, error } = await supabase
       .from("products")
@@ -103,16 +129,15 @@ export default function UserProductsPage() {
         price,
         stock,
         unit,
-        status,
         category:categories(name)
       `)
-      .order("id", { ascending: true });
-
-    setIsLoading(false);
+      .order("name", { ascending: true });
 
     if (error) {
       console.error(error);
-      alert(error.message || "ไม่สามารถโหลดข้อมูลสินค้าได้");
+      setProducts([]);
+      setPageError(error.message || "ไม่สามารถโหลดข้อมูลสินค้าได้");
+      setIsLoading(false);
       return;
     }
 
@@ -122,13 +147,13 @@ export default function UserProductsPage() {
       barcode: product.barcode || "",
       name: product.name || "-",
       category: getCategoryName(product.category),
-      price: Number(product.price || 0),
-      stock: Number(product.stock || 0),
+      price: toNumber(product.price),
+      stock: toNumber(product.stock),
       unit: product.unit || "ชิ้น",
-      status: product.status || getStatusFromStock(product.stock),
     }));
 
     setProducts(mappedProducts);
+    setIsLoading(false);
   }
 
   useEffect(() => {
@@ -143,7 +168,9 @@ export default function UserProductsPage() {
           schema: "public",
           table: "products",
         },
-        () => void loadProducts()
+        () => {
+          void loadProducts();
+        }
       )
       .subscribe();
 
@@ -155,7 +182,9 @@ export default function UserProductsPage() {
   const filteredProducts = useMemo(() => {
     const search = normalizeValue(keyword);
 
-    if (!search) return products;
+    if (!search) {
+      return products;
+    }
 
     return products.filter((product) =>
       [
@@ -163,7 +192,7 @@ export default function UserProductsPage() {
         product.barcode,
         product.name,
         product.category,
-        product.status,
+        getStockInfo(product.stock).label,
       ].some((value) => normalizeValue(value).includes(search))
     );
   }, [products, keyword]);
@@ -176,17 +205,37 @@ export default function UserProductsPage() {
     );
   }, [products, receiveProductId]);
 
+  const summary = useMemo(() => {
+    return {
+      total: products.length,
+      normal: products.filter((product) => product.stock >= 10).length,
+      low: products.filter(
+        (product) => product.stock > 0 && product.stock < 10
+      ).length,
+      out: products.filter((product) => product.stock <= 0).length,
+    };
+  }, [products]);
+
   function findProduct(value) {
     const search = normalizeValue(value);
 
-    if (!search) return null;
+    if (!search) {
+      return null;
+    }
+
+    const exactMatch = products.find(
+      (product) =>
+        normalizeValue(product.barcode) === search ||
+        normalizeValue(product.code) === search
+    );
+
+    if (exactMatch) {
+      return exactMatch;
+    }
 
     return (
-      products.find(
-        (product) =>
-          normalizeValue(product.barcode) === search ||
-          normalizeValue(product.code) === search ||
-          normalizeValue(product.name).includes(search)
+      products.find((product) =>
+        normalizeValue(product.name).includes(search)
       ) || null
     );
   }
@@ -195,7 +244,7 @@ export default function UserProductsPage() {
     window.setTimeout(() => {
       barcodeInputRef.current?.focus();
       barcodeInputRef.current?.select();
-    }, 50);
+    }, 100);
   }
 
   function openDetail(product) {
@@ -203,8 +252,35 @@ export default function UserProductsPage() {
     setShowDetail(true);
   }
 
+  function closeDetail() {
+    setShowDetail(false);
+    setSelectedProduct(null);
+  }
+
+  function openReceiveModal(product = null) {
+    setReceiveProductId(product ? String(product.id) : "");
+    setReceiveQuantity("");
+    setReceiveNote("");
+    setReceiveError("");
+    setShowReceiveModal(true);
+  }
+
+  function closeReceiveModal(forceClose = false) {
+    if (isReceiving && !forceClose) {
+      return;
+    }
+
+    setShowReceiveModal(false);
+    setReceiveProductId("");
+    setReceiveQuantity("");
+    setReceiveNote("");
+    setReceiveError("");
+  }
+
   function handleBarcodeKeyDown(event) {
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter") {
+      return;
+    }
 
     event.preventDefault();
 
@@ -240,36 +316,16 @@ export default function UserProductsPage() {
   function handleSearch(event) {
     event.preventDefault();
 
-    const value = keyword.trim();
+    const searchValue = keyword.trim();
 
-    if (!value) {
+    if (!searchValue) {
       setSelectedProduct(null);
       setShowDetail(true);
       return;
     }
 
-    const product = findProduct(value);
-
-    setSelectedProduct(product);
+    setSelectedProduct(findProduct(searchValue));
     setShowDetail(true);
-  }
-
-  function openReceiveModal(product = null) {
-    setReceiveProductId(product ? String(product.id) : "");
-    setReceiveQuantity("");
-    setReceiveNote("");
-    setReceiveError("");
-    setShowReceiveModal(true);
-  }
-
-  function closeReceiveModal() {
-    if (isReceiving) return;
-
-    setShowReceiveModal(false);
-    setReceiveProductId("");
-    setReceiveQuantity("");
-    setReceiveNote("");
-    setReceiveError("");
   }
 
   async function handleReceiveStock(event) {
@@ -299,11 +355,10 @@ export default function UserProductsPage() {
       p_note: receiveNote.trim() || null,
     });
 
-    setIsReceiving(false);
-
     if (error) {
       console.error(error);
       setReceiveError(error.message || "รับสินค้าเข้าไม่สำเร็จ");
+      setIsReceiving(false);
       return;
     }
 
@@ -312,7 +367,7 @@ export default function UserProductsPage() {
 
     const stockAfter = Number.isFinite(returnedStock)
       ? returnedStock
-      : Number(productBeforeReceive?.stock || 0) + quantity;
+      : toNumber(productBeforeReceive?.stock) + quantity;
 
     await loadProducts();
 
@@ -324,11 +379,11 @@ export default function UserProductsPage() {
       return {
         ...previous,
         stock: stockAfter,
-        status: getStatusFromStock(stockAfter),
       };
     });
 
-    closeReceiveModal();
+    setIsReceiving(false);
+    closeReceiveModal(true);
 
     alert(
       `${result.message || "รับสินค้าเข้าสำเร็จ"}\nสินค้า: ${
@@ -338,23 +393,30 @@ export default function UserProductsPage() {
       }`
     );
   }
+    return (
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
+        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
+              🥤
+            </div>
 
-  return (
-    <div className="min-h-screen bg-[#f8f9fb] flex">
-      <aside className="w-[300px] shrink-0 bg-[#111b2b] text-white min-h-screen">
-        <div className="bg-red-600 p-8 rounded-br-[45px]">
-          <div className="text-3xl">🥤</div>
+            <div>
+              <h2 className="text-lg font-bold">ระบบบริหารจัดการ</h2>
 
-          <h2 className="font-bold mt-3 text-lg">
-            ระบบบริหารจัดการ
-          </h2>
-
-          <p className="text-sm">
-            ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
-          </p>
+              <p className="text-xs text-white/80">
+                ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+              </p>
+            </div>
+          </div>
         </div>
 
-        <nav className="p-5 space-y-4">
+        <nav className="space-y-2 p-5">
+          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+            เมนูพนักงาน
+          </p>
+
           <Menu
             icon={<FaHome />}
             text="หน้าหลัก"
@@ -380,35 +442,83 @@ export default function UserProductsPage() {
             href="/user/reports"
           />
 
-          <LogoutButton />
+          <div className="pt-5">
+            <LogoutButton />
+          </div>
         </nav>
       </aside>
 
-      <main className="flex-1 min-w-0 p-6 xl:p-10">
-        <header className="flex flex-col gap-5 lg:flex-row lg:justify-between lg:items-start mb-8">
+      <main className="min-w-0 flex-1 p-6 xl:p-10">
+        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">
-              สินค้า
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold text-slate-900">
+                สินค้า
+              </h1>
 
-            <p className="text-gray-500 mt-2">
-              Products &gt; สินค้า
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
+                พนักงาน
+              </span>
+            </div>
+
+            <p className="mt-2 text-slate-500">
+              ค้นหา ตรวจสอบสินค้า ยิงบาร์โค้ด และรับสินค้าเข้า
             </p>
           </div>
 
           <AccountHeader />
         </header>
 
-        <section className="bg-white rounded-3xl border shadow-sm p-6 md:p-8">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+        {pageError && (
+          <section className="mt-6 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
+            <FaExclamationTriangle className="mt-1 shrink-0" />
+            <p>{pageError}</p>
+          </section>
+        )}
+
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+          <SummaryCard
+            title="สินค้าทั้งหมด"
+            value={`${summary.total} รายการ`}
+            detail="สินค้าในระบบ"
+            icon={<FaBox />}
+            color="blue"
+          />
+
+          <SummaryCard
+            title="สินค้าปกติ"
+            value={`${summary.normal} รายการ`}
+            detail="เหลือตั้งแต่ 10 ชิ้น"
+            icon={<FaCheckCircle />}
+            color="green"
+          />
+
+          <SummaryCard
+            title="สินค้าใกล้หมด"
+            value={`${summary.low} รายการ`}
+            detail="เหลือ 1–9 ชิ้น"
+            icon={<FaExclamationTriangle />}
+            color="orange"
+          />
+
+          <SummaryCard
+            title="สินค้าหมด"
+            value={`${summary.out} รายการ`}
+            detail="ควรรับสินค้าเข้า"
+            icon={<FaBoxOpen />}
+            color="red"
+          />
+        </section>
+
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">
+              <h2 className="text-2xl font-bold text-slate-900">
                 ค้นหาและตรวจสอบสินค้า
               </h2>
 
-              <p className="text-gray-500 mt-2">
-                User ค้นหาสินค้า ยิงบาร์โค้ด และรับสินค้าเข้าได้
-                แต่ไม่สามารถเพิ่มสินค้าใหม่ได้
+              <p className="mt-1 text-slate-500">
+                ค้นหาสินค้า ยิงบาร์โค้ด และรับสินค้าเข้าได้
               </p>
             </div>
 
@@ -416,7 +526,7 @@ export default function UserProductsPage() {
               <button
                 type="button"
                 onClick={() => openReceiveModal()}
-                className="border border-red-600 text-red-600 px-6 py-4 rounded-xl flex items-center gap-3 hover:bg-red-50"
+                className="flex items-center gap-2 rounded-xl border border-red-600 bg-white px-5 py-3 text-red-600 hover:bg-red-50"
               >
                 <FaPlus />
                 รับสินค้าเข้า
@@ -426,16 +536,16 @@ export default function UserProductsPage() {
                 type="button"
                 onClick={() => void loadProducts()}
                 disabled={isLoading}
-                className="bg-red-600 text-white px-6 py-4 rounded-xl flex items-center gap-3 disabled:bg-red-300"
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
               >
                 <FaSyncAlt className={isLoading ? "animate-spin" : ""} />
-                รีเฟรชข้อมูล
+                {isLoading ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
               </button>
             </div>
           </div>
 
-          <div className="mt-6 rounded-2xl border-2 border-dashed border-red-200 bg-red-50 p-5">
-            <label className="flex items-center gap-2 font-bold text-gray-800 mb-3">
+          <div className="mt-7 rounded-2xl border-2 border-dashed border-red-200 bg-red-50 p-5">
+            <label className="mb-3 flex items-center gap-2 font-bold text-slate-800">
               <FaBarcode className="text-red-600" />
               ยิงบาร์โค้ดสินค้า
             </label>
@@ -447,20 +557,20 @@ export default function UserProductsPage() {
               onKeyDown={handleBarcodeKeyDown}
               autoComplete="off"
               placeholder="คลิกช่องนี้ แล้วใช้เครื่องยิงบาร์โค้ด"
-              className="w-full rounded-xl border bg-white px-5 py-4 text-lg text-gray-800 outline-none focus:border-red-500"
+              className="w-full rounded-xl border border-slate-200 bg-white px-5 py-4 text-lg text-slate-800 outline-none focus:border-red-500"
             />
 
             <div
               className={`mt-3 rounded-xl px-4 py-3 text-sm ${
                 scanError
                   ? "bg-red-100 text-red-700"
-                  : "bg-white text-gray-600"
+                  : "bg-white text-slate-600"
               }`}
             >
               {scanMessage}
             </div>
 
-            <p className="mt-3 text-sm text-gray-500">
+            <p className="mt-3 text-sm text-slate-500">
               รองรับเครื่องยิงบาร์โค้ด USB หรือ Bluetooth
               ที่ส่งปุ่ม Enter หลังรหัสสินค้า
             </p>
@@ -468,22 +578,22 @@ export default function UserProductsPage() {
 
           <form
             onSubmit={handleSearch}
-            className="mt-6 flex flex-col md:flex-row gap-4"
+            className="mt-6 flex flex-col gap-4 md:flex-row"
           >
             <div className="relative flex-1">
-              <FaSearch className="absolute left-5 top-5 text-gray-500" />
+              <FaSearch className="absolute left-5 top-5 text-slate-400" />
 
               <input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
-                placeholder="ค้นหาด้วยชื่อสินค้า / รหัสสินค้า"
-                className="w-full border-2 border-gray-300 focus:border-red-500 rounded-xl py-4 pl-12 pr-5 outline-none text-gray-800"
+                placeholder="ค้นหาด้วยชื่อสินค้า รหัสสินค้า หรือบาร์โค้ด"
+                className="w-full rounded-xl border-2 border-slate-200 bg-white py-4 pl-12 pr-5 text-slate-800 outline-none focus:border-red-500"
               />
             </div>
 
             <button
               type="submit"
-              className="bg-red-600 text-white px-8 py-4 rounded-xl flex items-center justify-center gap-3"
+              className="flex items-center justify-center gap-2 rounded-xl bg-slate-800 px-7 py-4 text-white hover:bg-slate-900"
             >
               <FaSearch />
               ค้นหาสินค้า
@@ -491,73 +601,126 @@ export default function UserProductsPage() {
           </form>
         </section>
 
-        <section className="mt-8 bg-white rounded-3xl border shadow-sm p-6">
-          <div className="flex items-center justify-between mb-5">
-            <h2 className="text-2xl font-bold text-gray-900">
-              รายการสินค้า
-            </h2>
+        <section className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">
+                รายการสินค้า
+              </h2>
 
-            <p className="text-gray-500">
-              ทั้งหมด {filteredProducts.length} รายการ
-            </p>
+              <p className="mt-1 text-sm text-slate-500">
+                แสดง {filteredProducts.length} จาก {summary.total} รายการ
+              </p>
+            </div>
+
+            <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600">
+              เลือกสินค้าเพื่อดูรายละเอียด
+            </span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-gray-800">
+            <table className="w-full min-w-[1040px] text-sm">
               <thead>
-                <tr className="bg-gray-100 text-gray-700">
-                  <th className="p-4 text-left">รหัสสินค้า</th>
-                  <th className="p-4 text-left">ชื่อสินค้า</th>
-                  <th className="p-4 text-left">หมวดหมู่</th>
-                  <th className="p-4 text-left">ราคาขาย</th>
-                  <th className="p-4 text-left">สต๊อก</th>
-                  <th className="p-4 text-left">บาร์โค้ด</th>
-                  <th className="p-4 text-center">รายละเอียด</th>
+                <tr className="bg-slate-50 text-slate-600">
+                  <th className="px-5 py-4 text-left font-semibold">
+                    รหัสสินค้า
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ชื่อสินค้า
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    หมวดหมู่
+                  </th>
+                  <th className="px-5 py-4 text-right font-semibold">
+                    ราคาขาย
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    สต๊อก
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    บาร์โค้ด
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    รายละเอียด
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {filteredProducts.map((product) => (
-                  <tr key={product.id} className="border-b">
-                    <td className="p-4">{product.code}</td>
-
-                    <td className="p-4 font-medium">
-                      {product.name}
-                    </td>
-
-                    <td className="p-4">
-                      {product.category}
-                    </td>
-
-                    <td className="p-4">
-                      {formatMoney(product.price)} บาท
-                    </td>
-
-                    <td className="p-4">
-                      {product.stock} {product.unit}
-                    </td>
-
-                    <td className="p-4 font-mono text-sm">
-                      {product.barcode || "-"}
-                    </td>
-
-                    <td className="p-4 text-center">
-                      <button
-                        type="button"
-                        onClick={() => openDetail(product)}
-                        className="border border-red-500 text-red-600 px-4 py-2 rounded-lg hover:bg-red-50"
-                      >
-                        ดูสินค้า
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-
-                {filteredProducts.length === 0 && (
+                {isLoading && (
                   <tr>
                     <td
                       colSpan="7"
-                      className="p-10 text-center text-gray-500"
+                      className="px-6 py-16 text-center text-slate-500"
+                    >
+                      กำลังโหลดข้อมูลสินค้า...
+                    </td>
+                  </tr>
+                )}
+
+                {!isLoading &&
+                  filteredProducts.map((product) => {
+                    const stockInfo = getStockInfo(product.stock);
+
+                    return (
+                      <tr
+                        key={product.id}
+                        className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
+                      >
+                        <td className="px-5 py-4">
+                          <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-mono text-xs font-semibold text-slate-600">
+                            {product.code}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4 font-semibold text-slate-900">
+                          {product.name}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          {product.category}
+                        </td>
+
+                        <td className="px-5 py-4 text-right font-medium">
+                          ฿ {formatMoney(product.price)}
+                        </td>
+
+                        <td className="px-5 py-4 text-center">
+                          <div className="flex flex-col items-center gap-1">
+                            <span className={`font-bold ${stockInfo.text}`}>
+                              {product.stock} {product.unit}
+                            </span>
+
+                            <span
+                              className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stockInfo.badge}`}
+                            >
+                              {stockInfo.label}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4 font-mono text-xs text-slate-500">
+                          {product.barcode || "-"}
+                        </td>
+
+                        <td className="px-5 py-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => openDetail(product)}
+                            className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-red-600 hover:bg-red-100"
+                          >
+                            ดูสินค้า
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                {!isLoading && filteredProducts.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan="7"
+                      className="px-6 py-16 text-center text-slate-500"
                     >
                       ไม่พบสินค้าที่ค้นหา
                     </td>
@@ -570,42 +733,43 @@ export default function UserProductsPage() {
       </main>
 
       {showReceiveModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <form
             onSubmit={handleReceiveStock}
-            className="bg-white w-full max-w-xl rounded-3xl p-7 md:p-8 relative"
+            className="relative w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl md:p-8"
           >
             <button
               type="button"
-              onClick={closeReceiveModal}
-              className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
+              onClick={() => closeReceiveModal()}
+              className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
-              <FaTimes className="text-2xl" />
+              <FaTimes className="text-xl" />
             </button>
 
-            <h2 className="text-2xl font-bold text-gray-900">
+            <h2 className="text-2xl font-bold text-slate-900">
               รับสินค้าเข้า
             </h2>
 
-            <p className="text-gray-500 mt-2">
+            <p className="mt-1 text-slate-500">
               เลือกสินค้าที่มีอยู่แล้ว และระบุจำนวนที่รับเข้า
             </p>
 
             {receiveError && (
-              <div className="mt-5 rounded-xl bg-red-50 border border-red-200 text-red-600 px-4 py-3">
+              <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-600">
                 {receiveError}
               </div>
             )}
 
             <div className="mt-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="mb-2 block text-sm font-medium text-slate-700">
                 สินค้า
               </label>
 
               <select
                 value={receiveProductId}
                 onChange={(event) => setReceiveProductId(event.target.value)}
-                className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+                disabled={isReceiving}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
               >
                 <option value="">-- เลือกสินค้า --</option>
 
@@ -619,12 +783,12 @@ export default function UserProductsPage() {
             </div>
 
             {selectedReceiveProduct && (
-              <div className="mt-4 rounded-xl bg-gray-50 border p-4">
-                <p className="font-semibold text-gray-900">
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="font-semibold text-slate-900">
                   {selectedReceiveProduct.name}
                 </p>
 
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-slate-500">
                   รหัสสินค้า: {selectedReceiveProduct.code} · คงเหลือ{" "}
                   {selectedReceiveProduct.stock}{" "}
                   {selectedReceiveProduct.unit}
@@ -633,7 +797,7 @@ export default function UserProductsPage() {
             )}
 
             <div className="mt-5">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="mb-2 block text-sm font-medium text-slate-700">
                 จำนวนรับเข้า
               </label>
 
@@ -643,30 +807,33 @@ export default function UserProductsPage() {
                 step="1"
                 value={receiveQuantity}
                 onChange={(event) => setReceiveQuantity(event.target.value)}
+                disabled={isReceiving}
                 placeholder="เช่น 50"
-                className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
               />
             </div>
 
             <div className="mt-5">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="mb-2 block text-sm font-medium text-slate-700">
                 หมายเหตุ
               </label>
 
               <textarea
                 value={receiveNote}
                 onChange={(event) => setReceiveNote(event.target.value)}
+                disabled={isReceiving}
                 placeholder="เช่น รับจากร้านค้าส่ง"
                 rows="3"
-                className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500 resize-none"
+                className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
               />
             </div>
 
-            <div className="flex justify-end gap-3 mt-8">
+            <div className="mt-8 flex justify-end gap-3">
               <button
                 type="button"
-                onClick={closeReceiveModal}
-                className="border px-5 py-3 rounded-xl text-gray-700"
+                onClick={() => closeReceiveModal()}
+                disabled={isReceiving}
+                className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
               >
                 ยกเลิก
               </button>
@@ -674,7 +841,7 @@ export default function UserProductsPage() {
               <button
                 type="submit"
                 disabled={isReceiving}
-                className="bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2 disabled:bg-red-300"
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
               >
                 <FaSave />
                 {isReceiving ? "กำลังบันทึก..." : "บันทึกรับสินค้า"}
@@ -685,40 +852,40 @@ export default function UserProductsPage() {
       )}
 
       {showDetail && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-8 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
+          <div className="relative w-full max-w-lg rounded-3xl bg-white p-7 shadow-2xl md:p-8">
             <button
               type="button"
-              onClick={() => setShowDetail(false)}
-              className="absolute top-5 right-5 text-gray-500 hover:text-red-600"
+              onClick={closeDetail}
+              className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
-              <FaTimes className="text-2xl" />
+              <FaTimes className="text-xl" />
             </button>
 
             {selectedProduct ? (
               <>
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
                     <FaBoxOpen className="text-2xl" />
                   </div>
 
                   <div>
-                    <h2 className="text-2xl font-bold text-gray-900">
+                    <h2 className="text-2xl font-bold text-slate-900">
                       ข้อมูลสินค้า
                     </h2>
 
-                    <p className="text-gray-500">
+                    <p className="mt-1 text-slate-500">
                       {selectedProduct.code}
                     </p>
                   </div>
                 </div>
 
-                <div className="mt-7 border rounded-2xl p-5">
-                  <p className="text-xl font-bold text-gray-900">
+                <div className="mt-7 rounded-2xl border border-slate-200 p-5">
+                  <p className="text-xl font-bold text-slate-900">
                     {selectedProduct.name}
                   </p>
 
-                  <div className="grid grid-cols-2 gap-4 mt-5 text-gray-700">
+                  <div className="mt-5 grid grid-cols-2 gap-5">
                     <Info
                       label="หมวดหมู่"
                       value={selectedProduct.category}
@@ -726,7 +893,7 @@ export default function UserProductsPage() {
 
                     <Info
                       label="ราคาขาย"
-                      value={`${formatMoney(selectedProduct.price)} บาท`}
+                      value={`฿ ${formatMoney(selectedProduct.price)}`}
                     />
 
                     <Info
@@ -740,41 +907,41 @@ export default function UserProductsPage() {
                     />
                   </div>
 
-                  <div className="mt-5">
-                    <StatusBadge status={selectedProduct.status} />
+                  <div className="mt-6">
+                    <StockBadge stock={selectedProduct.stock} />
                   </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => {
-                    setShowDetail(false);
+                    closeDetail();
                     openReceiveModal(selectedProduct);
                   }}
-                  className="mt-5 w-full border border-red-300 text-red-600 py-3 rounded-xl flex items-center justify-center gap-2"
+                  className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-50 py-3 text-red-600 hover:bg-red-100"
                 >
                   <FaPlus />
                   รับสินค้าเข้ารายการนี้
                 </button>
               </>
             ) : (
-              <div className="text-center py-8">
-                <FaExclamationTriangle className="text-5xl text-orange-500 mx-auto" />
+              <div className="py-8 text-center">
+                <FaExclamationTriangle className="mx-auto text-5xl text-orange-500" />
 
-                <h2 className="text-2xl font-bold text-gray-900 mt-5">
+                <h2 className="mt-5 text-2xl font-bold text-slate-900">
                   ไม่พบสินค้า
                 </h2>
 
-                <p className="text-gray-500 mt-2">
-                  ไม่พบข้อมูลจากบาร์โค้ดหรือรหัสสินค้านี้
+                <p className="mt-2 text-slate-500">
+                  ไม่พบข้อมูลจากบาร์โค้ด รหัสสินค้า หรือชื่อสินค้านี้
                 </p>
               </div>
             )}
 
             <button
               type="button"
-              onClick={() => setShowDetail(false)}
-              className="mt-7 w-full bg-red-600 text-white py-3 rounded-xl"
+              onClick={closeDetail}
+              className="mt-7 w-full rounded-xl bg-slate-800 py-3 text-white hover:bg-slate-900"
             >
               ปิดหน้าต่าง
             </button>
@@ -789,12 +956,14 @@ function Menu({ icon, text, href, active }) {
   return (
     <Link
       href={href}
-      className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl whitespace-nowrap ${
-        active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
+      className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
+        active
+          ? "bg-red-600 text-white shadow-lg"
+          : "text-slate-200 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <span className="text-xl">{icon}</span>
-      <span>{text}</span>
+      <span className="text-lg">{icon}</span>
+      <span className="font-medium">{text}</span>
     </Link>
   );
 }
@@ -802,28 +971,70 @@ function Menu({ icon, text, href, active }) {
 function Info({ label, value }) {
   return (
     <div>
-      <p className="text-sm text-gray-500">{label}</p>
-      <p className="font-semibold mt-1 break-words">{value}</p>
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className="mt-1 break-words font-semibold text-slate-900">
+        {value}
+      </p>
     </div>
   );
 }
 
-function StatusBadge({ status }) {
-  const statusStyle = {
-    มีสินค้า: "bg-green-100 text-green-600",
-    พร้อมขาย: "bg-green-100 text-green-600",
-    ใกล้หมด: "bg-orange-100 text-orange-600",
-    หมด: "bg-red-100 text-red-600",
-  };
+function StockBadge({ stock }) {
+  const stockInfo = getStockInfo(stock);
 
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium ${
-        statusStyle[status] || "bg-gray-100 text-gray-600"
-      }`}
+      className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold ${stockInfo.badge}`}
     >
       <FaCheckCircle />
-      {status}
+      {stockInfo.label}
     </span>
+  );
+}
+
+function SummaryCard({ title, value, detail, icon, color }) {
+  const styles = {
+    blue: {
+      icon: "bg-blue-100 text-blue-600",
+      line: "bg-blue-500",
+    },
+    green: {
+      icon: "bg-emerald-100 text-emerald-600",
+      line: "bg-emerald-500",
+    },
+    orange: {
+      icon: "bg-orange-100 text-orange-600",
+      line: "bg-orange-500",
+    },
+    red: {
+      icon: "bg-red-100 text-red-600",
+      line: "bg-red-500",
+    },
+  };
+
+  const style = styles[color] || styles.blue;
+
+  return (
+    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`absolute left-0 top-0 h-1 w-full ${style.line}`} />
+
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+
+          <h2 className="mt-3 text-3xl font-bold text-slate-900">
+            {value}
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">{detail}</p>
+        </div>
+
+        <div
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${style.icon}`}
+        >
+          {icon}
+        </div>
+      </div>
+    </div>
   );
 }

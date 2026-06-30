@@ -2,21 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase } from "../../lib/supabase";
-import LogoutButton from "../../components/LogoutButton";
+
 import AccountHeader from "../../components/AccountHeader";
+import LogoutButton from "../../components/LogoutButton";
 import UserDailySalesSubmission from "../../components/UserDailySalesSubmission";
+import { supabase } from "../../lib/supabase";
+
 import {
-  FaHome,
   FaBox,
-  FaShoppingCart,
-  FaChartBar,
   FaCalendarAlt,
+  FaChartBar,
   FaFileExcel,
+  FaHome,
   FaPrint,
-  FaShareAlt,
+  FaShoppingCart,
   FaSyncAlt,
-  FaUserCheck,
 } from "react-icons/fa";
 
 function getLocalDateString(date = new Date()) {
@@ -61,6 +61,7 @@ function getPeriodRange(type, selectedDate, selectedMonth, selectedYear) {
 
 function toNumber(value) {
   const number = Number(value);
+
   return Number.isFinite(number) ? number : 0;
 }
 
@@ -114,30 +115,12 @@ function formatPeriodTitle(type, range) {
 
 function csvCell(value) {
   const text = String(value ?? "").replaceAll('"', '""');
+
   return `"${text}"`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-function normalizeName(value) {
-  return String(value || "").trim().toLowerCase();
 }
 
 export default function UserReportsPage() {
   const today = getLocalDateString();
-
-  const [account, setAccount] = useState({
-    name: "User",
-    employeeCode: "-",
-    role: "user",
-  });
 
   const [reportType, setReportType] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(today);
@@ -148,15 +131,8 @@ export default function UserReportsPage() {
 
   const [sales, setSales] = useState([]);
   const [saleItems, setSaleItems] = useState([]);
-
-  const [myTodaySales, setMyTodaySales] = useState([]);
-  const [myTodayItems, setMyTodayItems] = useState([]);
-
-  const [isLoading, setIsLoading] = useState(false);
-  const [isLoadingMySummary, setIsLoadingMySummary] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [showCopyModal, setShowCopyModal] = useState(false);
-  const [copyText, setCopyText] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
   const periodRange = useMemo(() => {
@@ -168,178 +144,94 @@ export default function UserReportsPage() {
     );
   }, [reportType, selectedDate, selectedMonth, selectedYear]);
 
-  async function loadAccount() {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) return;
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("display_name, employee_code, role")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    setAccount({
-      name: profile?.display_name || "User",
-      employeeCode: profile?.employee_code || "-",
-      role: profile?.role || "user",
-    });
-  }
-
   async function loadReport() {
     setIsLoading(true);
     setErrorMessage("");
 
-    const { startDate, endDate } = periodRange;
+    try {
+      const { data: salesData, error: salesError } = await supabase
+        .from("sales")
+        .select(`
+          id,
+          sale_number,
+          sale_date,
+          seller_name,
+          note,
+          discount_amount,
+          total_amount,
+          created_at
+        `)
+        .gte("sale_date", periodRange.startDate)
+        .lte("sale_date", periodRange.endDate)
+        .order("created_at", { ascending: false });
 
-    const { data: salesData, error: salesError } = await supabase
-      .from("sales")
-      .select(`
-        id,
-        sale_number,
-        sale_date,
-        seller_name,
-        note,
-        discount_amount,
-        total_amount,
-        created_at
-      `)
-      .gte("sale_date", startDate)
-      .lte("sale_date", endDate)
-      .order("created_at", { ascending: false });
+      if (salesError) {
+        throw salesError;
+      }
 
-    if (salesError) {
-      console.error(salesError);
-      setErrorMessage("ไม่สามารถโหลดข้อมูลรายงานได้");
+      const salesList = salesData || [];
+      const saleIds = salesList.map((sale) => sale.id);
+
+      let items = [];
+
+      if (saleIds.length > 0) {
+        const { data: itemData, error: itemError } = await supabase
+          .from("sale_items")
+          .select(`
+            sale_id,
+            product_code,
+            product_name,
+            quantity,
+            price,
+            discount,
+            subtotal
+          `)
+          .in("sale_id", saleIds);
+
+        if (itemError) {
+          throw itemError;
+        }
+
+        items = itemData || [];
+      }
+
+      setSales(salesList);
+      setSaleItems(items);
+    } catch (error) {
+      console.error(error);
       setSales([]);
       setSaleItems([]);
+      setErrorMessage(error.message || "ไม่สามารถโหลดข้อมูลรายงานได้");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const salesList = salesData || [];
-    const saleIds = salesList.map((sale) => sale.id);
-
-    let itemList = [];
-
-    if (saleIds.length > 0) {
-      const { data: itemData, error: itemError } = await supabase
-        .from("sale_items")
-        .select(`
-          sale_id,
-          product_code,
-          product_name,
-          quantity,
-          price,
-          discount,
-          subtotal
-        `)
-        .in("sale_id", saleIds);
-
-      if (itemError) {
-        console.error(itemError);
-        setErrorMessage("โหลดรายการสินค้าในบิลไม่สำเร็จ");
-      } else {
-        itemList = itemData || [];
-      }
-    }
-
-    setSales(salesList);
-    setSaleItems(itemList);
-    setIsLoading(false);
-  }
-
-  async function loadMyTodaySummary() {
-    setIsLoadingMySummary(true);
-
-    const { data: todaySalesData, error: todaySalesError } = await supabase
-      .from("sales")
-      .select(`
-        id,
-        sale_number,
-        sale_date,
-        seller_name,
-        note,
-        discount_amount,
-        total_amount,
-        created_at
-      `)
-      .eq("sale_date", today)
-      .order("created_at", { ascending: false });
-
-    if (todaySalesError) {
-      console.error(todaySalesError);
-      setMyTodaySales([]);
-      setMyTodayItems([]);
-      setIsLoadingMySummary(false);
-      return;
-    }
-
-    const allowedNames = new Set([
-      normalizeName(account.name),
-      "user",
-    ]);
-
-    const mySalesList = (todaySalesData || []).filter((sale) =>
-      allowedNames.has(normalizeName(sale.seller_name))
-    );
-
-    const mySaleIds = mySalesList.map((sale) => sale.id);
-
-    let myItems = [];
-
-    if (mySaleIds.length > 0) {
-      const { data: myItemsData, error: myItemsError } = await supabase
-        .from("sale_items")
-        .select(`
-          sale_id,
-          product_code,
-          product_name,
-          quantity,
-          price,
-          discount,
-          subtotal
-        `)
-        .in("sale_id", mySaleIds);
-
-      if (myItemsError) {
-        console.error(myItemsError);
-      } else {
-        myItems = myItemsData || [];
-      }
-    }
-
-    setMyTodaySales(mySalesList);
-    setMyTodayItems(myItems);
-    setIsLoadingMySummary(false);
   }
 
   useEffect(() => {
-    loadAccount();
-  }, []);
-
-  useEffect(() => {
-    loadReport();
-    loadMyTodaySummary();
+    void loadReport();
 
     const channel = supabase
       .channel("user-reports-live")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "sales" },
+        {
+          event: "*",
+          schema: "public",
+          table: "sales",
+        },
         () => {
-          loadReport();
-          loadMyTodaySummary();
+          void loadReport();
         }
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "sale_items" },
+        {
+          event: "*",
+          schema: "public",
+          table: "sale_items",
+        },
         () => {
-          loadReport();
-          loadMyTodaySummary();
+          void loadReport();
         }
       )
       .subscribe();
@@ -347,15 +239,9 @@ export default function UserReportsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [
-    reportType,
-    selectedDate,
-    selectedMonth,
-    selectedYear,
-    account.name,
-  ]);
+  }, [reportType, selectedDate, selectedMonth, selectedYear]);
 
-  const itemSummaryBySale = useMemo(() => {
+  const summaryBySale = useMemo(() => {
     return saleItems.reduce((result, item) => {
       if (!result[item.sale_id]) {
         result[item.sale_id] = {
@@ -371,35 +257,40 @@ export default function UserReportsPage() {
     }, {});
   }, [saleItems]);
 
-  const totalSales = useMemo(() => {
-    return sales.reduce(
+  const totals = useMemo(() => {
+    const totalSales = sales.reduce(
       (sum, sale) => sum + toNumber(sale.total_amount),
       0
     );
-  }, [sales]);
 
-  const totalQuantity = useMemo(() => {
-    return saleItems.reduce(
-      (sum, item) => sum + toNumber(item.quantity),
-      0
-    );
-  }, [saleItems]);
-
-  const totalDiscount = useMemo(() => {
-    return sales.reduce(
+    const totalDiscount = sales.reduce(
       (sum, sale) => sum + toNumber(sale.discount_amount),
       0
     );
-  }, [sales]);
+
+    const totalQuantity = saleItems.reduce(
+      (sum, item) => sum + toNumber(item.quantity),
+      0
+    );
+
+    return {
+      totalSales,
+      totalDiscount,
+      totalQuantity,
+    };
+  }, [sales, saleItems]);
 
   const topProducts = useMemo(() => {
     const grouped = saleItems.reduce((result, item) => {
-      const key = item.product_code || item.product_name;
+      const key =
+        item.product_code ||
+        item.product_name ||
+        "ไม่ระบุสินค้า";
 
       if (!result[key]) {
         result[key] = {
-          name: item.product_name,
-          code: item.product_code,
+          code: item.product_code || "-",
+          name: item.product_name || "ไม่ระบุสินค้า",
           quantity: 0,
           amount: 0,
         };
@@ -411,25 +302,35 @@ export default function UserReportsPage() {
       return result;
     }, {});
 
-    return Object.values(grouped).sort((a, b) => b.quantity - a.quantity);
+    return Object.values(grouped).sort(
+      (a, b) => b.quantity - a.quantity
+    );
   }, [saleItems]);
-
-  const topProduct = topProducts[0];
 
   const chartData = useMemo(() => {
     const grouped = sales.reduce((result, sale) => {
-      let key = sale.sale_date;
+      const saleDate = String(sale.sale_date || "");
 
-      if (reportType === "yearly") {
-        key = sale.sale_date.slice(0, 7);
+      const label =
+        reportType === "yearly"
+          ? saleDate.slice(0, 7)
+          : saleDate;
+
+      if (!label) {
+        return result;
       }
 
-      result[key] = (result[key] || 0) + toNumber(sale.total_amount);
+      result[label] =
+        (result[label] || 0) + toNumber(sale.total_amount);
+
       return result;
     }, {});
 
     return Object.entries(grouped)
-      .map(([label, amount]) => ({ label, amount }))
+      .map(([label, amount]) => ({
+        label,
+        amount,
+      }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [sales, reportType]);
 
@@ -438,146 +339,11 @@ export default function UserReportsPage() {
     1
   );
 
-  const myTodayTotal = useMemo(() => {
-    return myTodaySales.reduce(
-      (sum, sale) => sum + toNumber(sale.total_amount),
-      0
-    );
-  }, [myTodaySales]);
-
-  const myTodayDiscount = useMemo(() => {
-    return myTodaySales.reduce(
-      (sum, sale) => sum + toNumber(sale.discount_amount),
-      0
-    );
-  }, [myTodaySales]);
-
-  const myTodayQuantity = useMemo(() => {
-    return myTodayItems.reduce(
-      (sum, item) => sum + toNumber(item.quantity),
-      0
-    );
-  }, [myTodayItems]);
-
-  function createMySummaryText() {
-    return [
-      "สรุปยอดขายประจำวัน",
-      `วันที่: ${formatDate(today)}`,
-      `รหัสพนักงาน: ${account.employeeCode}`,
-      `พนักงานขาย: ${account.name}`,
-      `จำนวนบิลขาย: ${myTodaySales.length.toLocaleString()} บิล`,
-      `จำนวนสินค้าที่ขาย: ${myTodayQuantity.toLocaleString()} ชิ้น`,
-      `ส่วนลดรวม: ${formatMoney(myTodayDiscount)} บาท`,
-      `ยอดขายสุทธิ: ${formatMoney(myTodayTotal)} บาท`,
-    ].join("\n");
-  }
-
-  function handleViewTodaySummary() {
-    setReportType("daily");
-    setSelectedDate(today);
-
-    window.setTimeout(() => {
-      document
-        .getElementById("my-daily-summary")
-        ?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 200);
-  }
-
-  function printMyTodaySummary() {
-    const printWindow = window.open("", "_blank", "width=500,height=680");
-
-    if (!printWindow) {
-      alert("กรุณาอนุญาต Pop-up เพื่อพิมพ์สรุปยอด");
-      return;
-    }
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>สรุปยอดขาย ${escapeHtml(formatDate(today))}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 32px;
-              color: #111827;
-            }
-
-            h1 {
-              font-size: 24px;
-              margin-bottom: 8px;
-            }
-
-            .line {
-              display: flex;
-              justify-content: space-between;
-              gap: 24px;
-              padding: 12px 0;
-              border-bottom: 1px solid #e5e7eb;
-            }
-
-            .total {
-              color: #dc2626;
-              font-size: 22px;
-              font-weight: bold;
-              margin-top: 18px;
-            }
-          </style>
-        </head>
-
-        <body>
-          <h1>สรุปยอดขายประจำวัน</h1>
-          <p>ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</p>
-          <p>วันที่: ${escapeHtml(formatDate(today))}</p>
-          <p>รหัสพนักงาน: ${escapeHtml(account.employeeCode)}</p>
-          <p>พนักงานขาย: ${escapeHtml(account.name)}</p>
-
-          <div class="line">
-            <span>จำนวนบิลขาย</span>
-            <strong>${myTodaySales.length.toLocaleString()} บิล</strong>
-          </div>
-
-          <div class="line">
-            <span>จำนวนสินค้าที่ขาย</span>
-            <strong>${myTodayQuantity.toLocaleString()} ชิ้น</strong>
-          </div>
-
-          <div class="line">
-            <span>ส่วนลดรวม</span>
-            <strong>${formatMoney(myTodayDiscount)} บาท</strong>
-          </div>
-
-          <div class="line total">
-            <span>ยอดขายสุทธิ</span>
-            <span>${formatMoney(myTodayTotal)} บาท</span>
-          </div>
-
-          <p style="margin-top:32px;text-align:center">
-            พิมพ์จากระบบบริหารจัดการร้านค้า
-          </p>
-        </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.focus();
-
-    window.setTimeout(() => {
-      printWindow.print();
-    }, 300);
-  }
-
-  async function handleSendSummary() {
-    const summaryText = createMySummaryText();
-
-    setCopyText(summaryText);
-    setShowCopyModal(true);
-  }
-
   async function handleRefresh() {
     setIsRefreshing(true);
 
     try {
-      await Promise.all([loadReport(), loadMyTodaySummary()]);
+      await loadReport();
     } finally {
       setIsRefreshing(false);
     }
@@ -601,17 +367,17 @@ export default function UserReportsPage() {
         "หมายเหตุ",
       ],
       ...sales.map((sale) => {
-        const summary = itemSummaryBySale[sale.id] || {
+        const itemSummary = summaryBySale[sale.id] || {
           quantity: 0,
           lines: 0,
         };
 
         return [
           formatDate(sale.sale_date),
-          sale.sale_number,
+          sale.sale_number || "-",
           sale.seller_name || "-",
-          summary.quantity,
-          summary.lines,
+          itemSummary.quantity,
+          itemSummary.lines,
           formatMoney(sale.discount_amount),
           formatMoney(sale.total_amount),
           sale.note || "",
@@ -635,45 +401,77 @@ export default function UserReportsPage() {
 
     URL.revokeObjectURL(url);
   }
+    return (
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="print:hidden w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
+        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
+              🥤
+            </div>
 
-  function printReport() {
-    window.print();
-  }
+            <div>
+              <h2 className="text-lg font-bold">ระบบบริหารจัดการ</h2>
 
-  return (
-    <div className="min-h-screen flex bg-[#f8f9fb]">
-      <aside className="w-[300px] shrink-0 bg-[#1f2633] text-white rounded-r-[45px] overflow-hidden print:hidden">
-        <div className="bg-red-600 p-8 rounded-br-[45px]">
-          <div className="text-3xl">🥤</div>
-          <h2 className="font-bold mt-3">ระบบบริหารจัดการ</h2>
-          <p className="text-sm">ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</p>
+              <p className="text-xs text-white/80">
+                ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+              </p>
+            </div>
+          </div>
         </div>
 
-        <nav className="p-6 space-y-4">
+        <nav className="space-y-2 p-5">
+          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+            เมนูพนักงาน
+          </p>
+
           <Menu icon={<FaHome />} text="หน้าหลัก" href="/user/dashboard" />
           <Menu icon={<FaBox />} text="สินค้า" href="/user/products" />
-          <Menu icon={<FaShoppingCart />} text="การขาย" href="/user/sales" />
-          <Menu active icon={<FaChartBar />} text="รายงาน" href="/user/reports" />
-          <LogoutButton />
+          <Menu
+            icon={<FaShoppingCart />}
+            text="การขาย"
+            href="/user/sales"
+          />
+          <Menu
+            active
+            icon={<FaChartBar />}
+            text="รายงาน"
+            href="/user/reports"
+          />
+
+          <div className="pt-5">
+            <LogoutButton />
+          </div>
         </nav>
       </aside>
 
-      <main className="flex-1 min-w-0 p-6 xl:p-10">
-        <div className="flex justify-end mb-6 print:hidden">
+      <main className="min-w-0 flex-1 p-6 xl:p-10">
+        <header className="print:hidden flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold text-slate-900">
+                รายงาน
+              </h1>
+
+              <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
+                พนักงาน
+              </span>
+            </div>
+
+            <p className="mt-2 text-slate-500">
+              รายงานยอดขายรายวัน รายเดือน และรายปี
+            </p>
+          </div>
+
           <AccountHeader />
+        </header>
+
+        <div className="print:hidden mt-8">
+          <UserDailySalesSubmission />
         </div>
 
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold text-gray-900">รายงาน</h1>
-          <p className="text-gray-500 mt-2">
-            รายงานยอดขายรายวัน รายเดือน และรายปี
-          </p>
-        </div>
-
-        <UserDailySalesSubmission />
-
-        <section className="bg-white rounded-3xl border shadow-sm p-6 mb-6 print:hidden">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <section className="print:hidden mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <PeriodButton
               active={reportType === "daily"}
               title="รายวัน"
@@ -696,7 +494,7 @@ export default function UserReportsPage() {
             />
           </div>
 
-          <div className="mt-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 items-end">
+          <div className="mt-6 grid grid-cols-1 items-end gap-4 md:grid-cols-2 xl:grid-cols-4">
             {reportType === "daily" && (
               <DateField
                 label="เลือกวันที่"
@@ -727,73 +525,72 @@ export default function UserReportsPage() {
             )}
 
             <button
+              type="button"
               onClick={handleRefresh}
-              disabled={isRefreshing || isLoading}
-              className="border rounded-xl py-4 px-5 flex items-center justify-center gap-2 text-gray-700 disabled:opacity-60"
+              disabled={isLoading || isRefreshing}
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-4 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
               <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
               รีเฟรชข้อมูล
             </button>
 
             <button
+              type="button"
               onClick={exportCsv}
-              className="border border-green-300 text-green-600 rounded-xl py-4 px-5 flex items-center justify-center gap-2"
+              className="flex items-center justify-center gap-2 rounded-xl border border-emerald-300 px-5 py-4 text-emerald-600 hover:bg-emerald-50"
             >
               <FaFileExcel />
               Export CSV
             </button>
 
             <button
-              onClick={printReport}
-              className="border border-gray-300 text-gray-700 rounded-xl py-4 px-5 flex items-center justify-center gap-2"
+              type="button"
+              onClick={() => window.print()}
+              className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-4 text-slate-700 hover:bg-slate-50"
             >
               <FaPrint />
               พิมพ์รายงาน
             </button>
           </div>
-
-          <p className="mt-5 text-sm text-gray-500">
-            ผู้ดูแลระบบเป็นผู้ปิดยอดประจำวัน ส่วน User สามารถดูและพิมพ์รายงานย้อนหลังได้
-          </p>
         </section>
 
         {errorMessage && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-600">
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-700">
             {errorMessage}
           </div>
         )}
 
-        <section className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900">
+        <section className="mt-8">
+          <h2 className="text-2xl font-bold text-slate-900">
             {formatPeriodTitle(reportType, periodRange)}
           </h2>
 
-          <p className="mt-1 text-gray-500">
-            รายงานนี้แสดงข้อมูลรวมเดียวกับรายงานฝั่ง Admin
+          <p className="mt-1 text-slate-500">
+            สรุปยอดขายตามช่วงเวลาที่เลือก
           </p>
         </section>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 mb-6">
+        <section className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
             title="ยอดขายรวม"
-            value={`${formatMoney(totalSales)} บาท`}
-            small={`${sales.length.toLocaleString()} บิลขาย`}
+            value={`${formatMoney(totals.totalSales)} บาท`}
+            detail={`${sales.length.toLocaleString()} บิลขาย`}
             color="red"
           />
 
           <SummaryCard
             title="จำนวนสินค้าที่ขาย"
-            value={`${totalQuantity.toLocaleString()} ชิ้น`}
-            small={`ส่วนลดรวม ${formatMoney(totalDiscount)} บาท`}
+            value={`${totals.totalQuantity.toLocaleString()} ชิ้น`}
+            detail={`ส่วนลดรวม ${formatMoney(totals.totalDiscount)} บาท`}
             color="orange"
           />
 
           <SummaryCard
             title="สินค้าขายดี"
-            value={topProduct ? topProduct.name : "-"}
-            small={
-              topProduct
-                ? `ขายแล้ว ${topProduct.quantity.toLocaleString()} ชิ้น`
+            value={topProducts[0]?.name || "-"}
+            detail={
+              topProducts[0]
+                ? `ขายแล้ว ${topProducts[0].quantity.toLocaleString()} ชิ้น`
                 : "ยังไม่มีข้อมูล"
             }
             color="green"
@@ -801,66 +598,69 @@ export default function UserReportsPage() {
 
           <SummaryCard
             title="ยอดเฉลี่ยต่อบิล"
-            value={
+            value={`${formatMoney(
               sales.length > 0
-                ? `${formatMoney(totalSales / sales.length)} บาท`
-                : "0.00 บาท"
-            }
-            small="คำนวณจากยอดสุทธิ"
+                ? totals.totalSales / sales.length
+                : 0
+            )} บาท`}
+            detail="คำนวณจากยอดสุทธิ"
             color="blue"
           />
-        </div>
+        </section>
 
-        <div className="grid grid-cols-1 2xl:grid-cols-3 gap-6 mb-6">
-          <section className="2xl:col-span-2 bg-white rounded-3xl border shadow-sm p-6">
-            <h2 className="text-2xl font-bold text-gray-900">
+        <section className="mt-8 grid grid-cols-1 gap-6 2xl:grid-cols-3">
+          <div className="2xl:col-span-2 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-2xl font-bold text-slate-900">
               กราฟยอดขาย
             </h2>
 
-            <p className="text-gray-500 mt-1 mb-6">
+            <p className="mt-1 text-slate-500">
               แสดงยอดขายตามช่วงเวลาที่เลือก
             </p>
 
             {chartData.length > 0 ? (
-              <div className="h-72 flex items-end gap-3 border-b pb-8 overflow-x-auto">
+              <div className="mt-8 flex h-72 items-end gap-3 overflow-x-auto border-b border-slate-200 pb-8">
                 {chartData.map((item) => {
                   const height = Math.max(
                     8,
                     (item.amount / maxChartAmount) * 100
                   );
 
+                  const label =
+                    reportType === "yearly"
+                      ? item.label.slice(5, 7)
+                      : item.label.slice(8, 10);
+
                   return (
                     <div
                       key={item.label}
-                      className="min-w-16 flex-1 h-full flex flex-col justify-end items-center gap-2"
+                      className="flex h-full min-w-16 flex-1 flex-col items-center justify-end gap-2"
                     >
-                      <span className="text-xs text-gray-500 whitespace-nowrap">
+                      <span className="whitespace-nowrap text-xs text-slate-500">
                         {formatMoney(item.amount)}
                       </span>
 
                       <div
-                        className="w-full bg-red-500 rounded-t-xl"
+                        className="w-full rounded-t-xl bg-red-500"
                         style={{ height: `${height}%` }}
                       />
 
-                      <span className="text-xs text-gray-500 whitespace-nowrap">
-                        {reportType === "yearly"
-                          ? item.label.slice(5, 7)
-                          : item.label.slice(8, 10)}
+                      <span className="text-xs text-slate-500">
+                        {label}
                       </span>
                     </div>
                   );
                 })}
               </div>
             ) : (
-              <div className="h-72 rounded-2xl bg-gray-50 flex items-center justify-center text-gray-500">
+              <div className="mt-6 flex h-72 items-center justify-center rounded-2xl bg-slate-50 text-slate-500">
                 ยังไม่มีข้อมูลยอดขายในช่วงนี้
               </div>
             )}
-          </section>
+          </div>
 
-          <section className="bg-white rounded-3xl border shadow-sm p-6">
-            <h2 className="text-2xl font-bold text-gray-900">
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="text-2xl font-bold text-slate-900">
               สินค้าขายดี
             </h2>
 
@@ -869,15 +669,15 @@ export default function UserReportsPage() {
                 topProducts.slice(0, 5).map((item, index) => (
                   <div
                     key={`${item.code}-${index}`}
-                    className="flex justify-between gap-4 border-b pb-4 last:border-b-0"
+                    className="flex justify-between gap-4 border-b border-slate-100 pb-4 last:border-b-0"
                   >
                     <div>
-                      <p className="font-semibold text-gray-900">
+                      <p className="font-semibold text-slate-900">
                         {item.name}
                       </p>
 
-                      <p className="text-sm text-gray-500 mt-1">
-                        {item.code || "-"}
+                      <p className="mt-1 text-sm text-slate-500">
+                        {item.code}
                       </p>
                     </div>
 
@@ -886,27 +686,27 @@ export default function UserReportsPage() {
                         {item.quantity.toLocaleString()} ชิ้น
                       </p>
 
-                      <p className="text-sm text-gray-500 mt-1">
+                      <p className="mt-1 text-sm text-slate-500">
                         {formatMoney(item.amount)} บาท
                       </p>
                     </div>
                   </div>
                 ))
               ) : (
-                <p className="text-gray-500">ยังไม่มีรายการขาย</p>
+                <p className="text-slate-500">ยังไม่มีรายการขาย</p>
               )}
             </div>
-          </section>
-        </div>
+          </div>
+        </section>
 
-        <section className="bg-white rounded-3xl border shadow-sm p-6">
-          <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-5">
+        <section className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">
+              <h2 className="text-2xl font-bold text-slate-900">
                 รายการขาย
               </h2>
 
-              <p className="text-gray-500 mt-1">
+              <p className="mt-1 text-sm text-slate-500">
                 แสดงรายการขายรวมตามช่วงเวลาที่เลือก
               </p>
             </div>
@@ -917,64 +717,83 @@ export default function UserReportsPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1050px]">
-              <thead className="bg-gray-100 text-gray-700">
-                <tr>
-                  <th className="p-4 text-left">#</th>
-                  <th className="p-4 text-left">วันที่ / เวลา</th>
-                  <th className="p-4 text-left">เลขที่บิล</th>
-                  <th className="p-4 text-left">พนักงานขาย</th>
-                  <th className="p-4 text-left">จำนวนสินค้า</th>
-                  <th className="p-4 text-left">ส่วนลด</th>
-                  <th className="p-4 text-left">ยอดสุทธิ</th>
-                  <th className="p-4 text-left">หมายเหตุ</th>
+            <table className="w-full min-w-[1050px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-slate-600">
+                  <th className="px-5 py-4 text-left font-semibold">#</th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    วันที่ / เวลา
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    เลขที่บิล
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    พนักงานขาย
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    จำนวนสินค้า
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ส่วนลด
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ยอดสุทธิ
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    หมายเหตุ
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
                 {sales.length > 0 ? (
                   sales.map((sale, index) => {
-                    const summary = itemSummaryBySale[sale.id] || {
+                    const itemSummary = summaryBySale[sale.id] || {
                       quantity: 0,
                       lines: 0,
                     };
 
                     return (
-                      <tr key={sale.id} className="border-b text-gray-800">
-                        <td className="p-4">{index + 1}</td>
+                      <tr
+                        key={sale.id}
+                        className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
+                      >
+                        <td className="px-5 py-4">{index + 1}</td>
 
-                        <td className="p-4">
-                          <div>{formatDate(sale.sale_date)}</div>
-                          <div className="text-xs text-gray-400 mt-1">
+                        <td className="px-5 py-4">
+                          <p>{formatDate(sale.sale_date)}</p>
+
+                          <p className="mt-1 text-xs text-slate-400">
                             {formatDateTime(sale.created_at)}
-                          </div>
+                          </p>
                         </td>
 
-                        <td className="p-4 font-semibold">
-                          {sale.sale_number}
+                        <td className="px-5 py-4 font-semibold text-slate-900">
+                          {sale.sale_number || "-"}
                         </td>
 
-                        <td className="p-4">
+                        <td className="px-5 py-4">
                           {sale.seller_name || "-"}
                         </td>
 
-                        <td className="p-4">
-                          {summary.quantity.toLocaleString()} ชิ้น
-                          <span className="text-xs text-gray-400 ml-1">
-                            ({summary.lines} รายการ)
+                        <td className="px-5 py-4">
+                          {itemSummary.quantity.toLocaleString()} ชิ้น
+
+                          <span className="ml-1 text-xs text-slate-400">
+                            ({itemSummary.lines} รายการ)
                           </span>
                         </td>
 
-                        <td className="p-4">
+                        <td className="px-5 py-4">
                           {formatMoney(sale.discount_amount)} บาท
                         </td>
 
-                        <td className="p-4 font-bold text-red-600">
+                        <td className="px-5 py-4 font-bold text-red-600">
                           {formatMoney(sale.total_amount)} บาท
                         </td>
 
-                        <td className="p-4 text-gray-500">
-                          {sale.note || "-"}
+                        <td className="max-w-[240px] px-5 py-4 text-slate-500">
+                          <p className="truncate">{sale.note || "-"}</p>
                         </td>
                       </tr>
                     );
@@ -983,7 +802,7 @@ export default function UserReportsPage() {
                   <tr>
                     <td
                       colSpan="8"
-                      className="p-12 text-center text-gray-500"
+                      className="px-6 py-16 text-center text-slate-500"
                     >
                       ยังไม่มีรายการขายในช่วงเวลาที่เลือก
                     </td>
@@ -993,58 +812,6 @@ export default function UserReportsPage() {
             </table>
           </div>
         </section>
-
-        {showCopyModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-5">
-            <div className="w-[92vw] max-w-5xl rounded-3xl bg-white shadow-2xl">
-              <div className="border-b px-8 py-6">
-                <h2 className="text-2xl font-bold text-gray-900">
-                  คัดลอกข้อความนี้ แล้วส่งให้ผู้ดูแลระบบ
-                </h2>
-
-                <p className="mt-2 text-gray-500">
-                  ลากเลือกข้อความทั้งหมด หรือกดปุ่มคัดลอกข้อความด้านล่าง
-                </p>
-              </div>
-
-              <div className="p-8">
-                <textarea
-                  value={copyText}
-                  readOnly
-                  rows={16}
-                  className="min-h-[420px] w-full resize-y rounded-2xl border border-gray-300 p-5 text-lg leading-8 text-gray-800 outline-none"
-                />
-              </div>
-
-              <div className="flex justify-end gap-4 border-t px-8 py-6">
-                <button
-                  type="button"
-                  onClick={() => setShowCopyModal(false)}
-                  className="rounded-xl border border-gray-300 px-6 py-3 font-semibold text-gray-700"
-                >
-                  ยกเลิก
-                </button>
-
-                <button
-                  type="button"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(copyText);
-                      alert("คัดลอกข้อความเรียบร้อยแล้ว");
-                    } catch {
-                      alert(
-                        "กรุณาลากเลือกข้อความในกล่อง แล้วกดคัดลอกเอง"
-                      );
-                    }
-                  }}
-                  className="rounded-xl bg-red-600 px-6 py-3 font-semibold text-white hover:bg-red-700"
-                >
-                  คัดลอกข้อความ
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );
@@ -1054,12 +821,14 @@ function Menu({ icon, text, href, active }) {
   return (
     <Link
       href={href}
-      className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl ${
-        active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
+      className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
+        active
+          ? "bg-red-600 text-white shadow-lg"
+          : "text-slate-200 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <span className="text-xl">{icon}</span>
-      <span>{text}</span>
+      <span className="text-lg">{icon}</span>
+      <span className="font-medium">{text}</span>
     </Link>
   );
 }
@@ -1072,13 +841,14 @@ function PeriodButton({ active, title, detail, onClick }) {
       className={`rounded-2xl border p-5 text-left transition ${
         active
           ? "border-red-600 bg-red-600 text-white"
-          : "bg-white text-gray-800 hover:bg-red-50"
+          : "border-slate-200 bg-white text-slate-800 hover:bg-red-50"
       }`}
     >
       <p className="text-xl font-bold">{title}</p>
+
       <p
         className={`mt-1 text-sm ${
-          active ? "text-red-100" : "text-gray-500"
+          active ? "text-red-100" : "text-slate-500"
         }`}
       >
         {detail}
@@ -1090,12 +860,12 @@ function PeriodButton({ active, title, detail, onClick }) {
 function DateField({ label, value, onChange, type, min, max }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-2">
+      <label className="mb-2 block text-sm font-medium text-slate-700">
         {label}
       </label>
 
       <div className="relative">
-        <FaCalendarAlt className="absolute left-4 top-4 text-gray-400 pointer-events-none" />
+        <FaCalendarAlt className="pointer-events-none absolute left-4 top-4 text-slate-400" />
 
         <input
           type={type}
@@ -1103,41 +873,46 @@ function DateField({ label, value, onChange, type, min, max }) {
           onChange={onChange}
           min={min}
           max={max}
-          className="w-full border rounded-xl py-4 pl-11 pr-4 text-gray-800 outline-none focus:border-red-500"
+          className="w-full rounded-xl border border-slate-200 py-3 pl-11 pr-4 text-slate-800 outline-none focus:border-red-500"
         />
       </div>
     </div>
   );
 }
 
-function SummaryCard({ title, value, small, color }) {
-  const colors = {
-    red: "border-red-200 bg-red-50 text-red-600",
-    orange: "border-orange-200 bg-orange-50 text-orange-600",
-    green: "border-green-200 bg-green-50 text-green-600",
-    blue: "border-blue-200 bg-blue-50 text-blue-600",
+function SummaryCard({ title, value, detail, color }) {
+  const styles = {
+    red: {
+      line: "bg-red-500",
+      text: "text-red-600",
+    },
+    orange: {
+      line: "bg-orange-500",
+      text: "text-orange-600",
+    },
+    green: {
+      line: "bg-emerald-500",
+      text: "text-emerald-600",
+    },
+    blue: {
+      line: "bg-blue-500",
+      text: "text-blue-600",
+    },
   };
 
-  return (
-    <div className={`rounded-3xl border p-6 ${colors[color]}`}>
-      <p className="font-semibold">{title}</p>
-      <p className="text-2xl font-bold mt-3 break-words">{value}</p>
-      <p className="text-sm mt-2 opacity-80">{small}</p>
-    </div>
-  );
-}
+  const style = styles[color] || styles.blue;
 
-function MiniSummary({ label, value, strong }) {
   return (
-    <div
-      className={`rounded-2xl border p-4 ${
-        strong
-          ? "border-red-200 bg-red-50 text-red-600"
-          : "border-gray-200 bg-gray-50 text-gray-800"
-      }`}
-    >
-      <p className="text-sm opacity-80">{label}</p>
-      <p className="text-xl font-bold mt-2">{value}</p>
+    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`absolute left-0 top-0 h-1 w-full ${style.line}`} />
+
+      <p className="text-sm font-medium text-slate-500">{title}</p>
+
+      <h3 className={`mt-3 break-words text-2xl font-bold ${style.text}`}>
+        {value}
+      </h3>
+
+      <p className="mt-2 text-sm text-slate-500">{detail}</p>
     </div>
   );
 }

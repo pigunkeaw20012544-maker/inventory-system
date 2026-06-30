@@ -2,28 +2,32 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase } from "../lib/supabase";
-import LogoutButton from "../components/LogoutButton";
 import AccountHeader from "../components/AccountHeader";
+import LogoutButton from "../components/LogoutButton";
+import { supabase } from "../lib/supabase";
 
 import {
-  FaHome,
   FaBox,
-  FaThLarge,
-  FaShoppingCart,
-  FaUsers,
   FaChartBar,
-  FaHistory,
-  FaPlus,
   FaEdit,
-  FaTrash,
-  FaSearch,
-  FaSyncAlt,
+  FaExclamationTriangle,
+  FaHistory,
+  FaHome,
+  FaPlus,
   FaSave,
+  FaSearch,
+  FaShieldAlt,
+  FaShoppingCart,
+  FaSyncAlt,
+  FaThLarge,
   FaTimes,
+  FaTrash,
+  FaUserCheck,
+  FaUserSlash,
+  FaUsers,
 } from "react-icons/fa";
 
-const emptyForm = {
+const EMPTY_FORM = {
   display_name: "",
   employee_code: "",
   position: "พนักงานขาย",
@@ -42,6 +46,18 @@ function formatDate(value) {
     month: "2-digit",
     year: "numeric",
   });
+}
+
+function normalizeValue(value) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function isUserActive(user) {
+  return user?.is_active !== false;
+}
+
+function getRoleLabel(role) {
+  return role === "admin" ? "Admin" : "User";
 }
 
 async function adminRequest(url, options = {}) {
@@ -75,15 +91,17 @@ export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [filter, setFilter] = useState("all");
+  const [currentUserId, setCurrentUserId] = useState("");
 
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState("add");
   const [editingUser, setEditingUser] = useState(null);
-  const [formData, setFormData] = useState(emptyForm);
+  const [formData, setFormData] = useState(EMPTY_FORM);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
   const [errorMessage, setErrorMessage] = useState("");
   const [formError, setFormError] = useState("");
 
@@ -93,24 +111,49 @@ export default function UsersPage() {
 
     try {
       const data = await adminRequest("/api/admin/users");
-      setUsers(data.users || []);
+
+      const mappedUsers = (data.users || []).map((user) => ({
+        ...user,
+        is_active: user.is_active !== false,
+      }));
+
+      setUsers(mappedUsers);
     } catch (error) {
       setUsers([]);
-      setErrorMessage(error.message);
+      setErrorMessage(error.message || "ไม่สามารถโหลดข้อมูลผู้ใช้งานได้");
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   }
 
   useEffect(() => {
+    async function loadCurrentUser() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      setCurrentUserId(user?.id || "");
+    }
+
+    void loadCurrentUser();
     void loadUsers();
+
+    function handleFocus() {
+      void loadUsers();
+    }
+
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   const filteredUsers = useMemo(() => {
-    const search = keyword.trim().toLowerCase();
+    const search = normalizeValue(keyword);
 
     return users.filter((user) => {
-      const matchSearch =
+      const matchesSearch =
         !search ||
         [
           user.display_name,
@@ -118,34 +161,52 @@ export default function UsersPage() {
           user.employee_code,
           user.phone,
           user.position,
-        ].some((value) =>
-          String(value || "").toLowerCase().includes(search)
-        );
+          user.role,
+        ].some((value) => normalizeValue(value).includes(search));
 
-      const matchFilter =
+      const active = isUserActive(user);
+
+      const matchesFilter =
         filter === "all" ||
-        (filter === "active" && user.is_active) ||
-        (filter === "inactive" && !user.is_active) ||
-        (filter === "admin" && user.role === "admin");
+        (filter === "active" && active) ||
+        (filter === "inactive" && !active) ||
+        (filter === "admin" && user.role === "admin") ||
+        (filter === "user" && user.role !== "admin");
 
-      return matchSearch && matchFilter;
+      return matchesSearch && matchesFilter;
     });
   }, [users, keyword, filter]);
 
-  const activeCount = users.filter((user) => user.is_active).length;
+  const activeCount = useMemo(() => {
+    return users.filter((user) => isUserActive(user)).length;
+  }, [users]);
 
-  const inactiveCount = users.filter(
-    (user) => !user.is_active
-  ).length;
+  const inactiveCount = useMemo(() => {
+    return users.filter((user) => !isUserActive(user)).length;
+  }, [users]);
 
-  const adminCount = users.filter(
-    (user) => user.role === "admin"
-  ).length;
+  const adminCount = useMemo(() => {
+    return users.filter((user) => user.role === "admin").length;
+  }, [users]);
+
+  const userCount = useMemo(() => {
+    return users.filter((user) => user.role !== "admin").length;
+  }, [users]);
+
+  const isEditingSelf =
+    String(editingUser?.id || "") === String(currentUserId || "");
+
+  function resetModal() {
+    setShowModal(false);
+    setEditingUser(null);
+    setFormData(EMPTY_FORM);
+    setFormError("");
+  }
 
   function openAddModal() {
     setModalMode("add");
     setEditingUser(null);
-    setFormData(emptyForm);
+    setFormData(EMPTY_FORM);
     setFormError("");
     setShowModal(true);
   }
@@ -163,7 +224,7 @@ export default function UsersPage() {
       email: user.email || "",
       password: "",
       role: user.role || "user",
-      is_active: user.is_active !== false,
+      is_active: isUserActive(user),
     });
 
     setShowModal(true);
@@ -172,10 +233,7 @@ export default function UsersPage() {
   function closeModal() {
     if (isSaving) return;
 
-    setShowModal(false);
-    setEditingUser(null);
-    setFormData(emptyForm);
-    setFormError("");
+    resetModal();
   }
 
   function handleChange(event) {
@@ -190,8 +248,16 @@ export default function UsersPage() {
   async function handleSave(event) {
     event.preventDefault();
 
-    if (!formData.display_name.trim() || !formData.email.trim()) {
+    const displayName = formData.display_name.trim();
+    const email = formData.email.trim().toLowerCase();
+
+    if (!displayName || !email) {
       setFormError("กรุณากรอกชื่อพนักงานและอีเมล");
+      return;
+    }
+
+    if (!email.includes("@")) {
+      setFormError("กรุณากรอกอีเมลให้ถูกต้อง");
       return;
     }
 
@@ -209,17 +275,31 @@ export default function UsersPage() {
       return;
     }
 
+    if (modalMode === "edit" && isEditingSelf && !formData.is_active) {
+      setFormError("ไม่สามารถปิดใช้งานบัญชีของตนเองได้");
+      return;
+    }
+
+    if (
+      modalMode === "edit" &&
+      isEditingSelf &&
+      formData.role !== "admin"
+    ) {
+      setFormError("ไม่สามารถลดสิทธิ์ Admin ของบัญชีตนเองได้");
+      return;
+    }
+
     setIsSaving(true);
     setFormError("");
 
     try {
       const payload = {
         ...formData,
-        display_name: formData.display_name.trim(),
+        display_name: displayName,
         employee_code: formData.employee_code.trim(),
         position: formData.position.trim(),
         phone: formData.phone.trim(),
-        email: formData.email.trim(),
+        email,
       };
 
       if (modalMode === "add") {
@@ -235,7 +315,7 @@ export default function UsersPage() {
       }
 
       await loadUsers();
-      closeModal();
+      resetModal();
 
       alert(
         modalMode === "add"
@@ -243,15 +323,22 @@ export default function UsersPage() {
           : "แก้ไขข้อมูลพนักงานสำเร็จ"
       );
     } catch (error) {
-      setFormError(error.message);
+      setFormError(error.message || "บันทึกข้อมูลไม่สำเร็จ");
+    } finally {
+      setIsSaving(false);
     }
-
-    setIsSaving(false);
   }
 
   async function handleDelete(user) {
+    const isSelf = String(user.id) === String(currentUserId);
+
+    if (isSelf) {
+      alert("ไม่สามารถลบบัญชีของตนเองได้");
+      return;
+    }
+
     const confirmed = window.confirm(
-      `ต้องการลบบัญชี "${user.display_name}" ใช่หรือไม่?`
+      `ต้องการลบบัญชี "${user.display_name}" ใช่หรือไม่?\n\nผู้ใช้นี้จะไม่สามารถเข้าสู่ระบบได้อีก`
     );
 
     if (!confirmed) return;
@@ -264,34 +351,45 @@ export default function UsersPage() {
       await loadUsers();
       alert("ลบบัญชีผู้ใช้งานสำเร็จ");
     } catch (error) {
-      alert(error.message);
+      alert(error.message || "ลบบัญชีไม่สำเร็จ");
     }
   }
 
   async function handleRefresh() {
     setIsRefreshing(true);
+    setKeyword("");
+    setFilter("all");
+
     await loadUsers();
+
     setIsRefreshing(false);
   }
 
   return (
-    <div className="min-h-screen bg-[#f8f9fb] flex">
-      <aside className="w-[300px] shrink-0 bg-[#1f2633] text-white rounded-r-[45px] overflow-hidden">
-        <div className="bg-red-600 p-8 rounded-br-[45px]">
-          <div className="text-3xl">🥤</div>
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
+        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
+              🥤
+            </div>
 
-          <h2 className="font-bold mt-3">
-            ระบบบริหารจัดการ
-          </h2>
+            <div>
+              <h2 className="text-lg font-bold">ระบบบริหารจัดการ</h2>
 
-          <p className="text-sm">
-            ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
-          </p>
+              <p className="text-xs text-white/80">
+                ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+              </p>
+            </div>
+          </div>
         </div>
 
-        <nav className="p-6 space-y-4">
-          <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" />
+        <nav className="space-y-2 p-5">
+          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+            เมนูหลัก
+          </p>
 
+          <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" />
           <Menu icon={<FaBox />} text="สินค้า" href="/products" />
 
           <Menu
@@ -312,229 +410,306 @@ export default function UsersPage() {
             href="/stock-movements"
           />
 
-          <Menu
-            icon={<FaChartBar />}
-            text="รายงาน"
-            href="/reports"
-          />
+          <Menu icon={<FaChartBar />} text="รายงาน" href="/reports" />
+          <Menu active icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
 
-          <Menu
-            active
-            icon={<FaUsers />}
-            text="ผู้ใช้งาน"
-            href="/users"
-          />
-
-          <LogoutButton />
+          <div className="pt-5">
+            <LogoutButton />
+          </div>
         </nav>
       </aside>
 
-      <main className="flex-1 min-w-0 p-6 xl:p-10">
-        <div className="flex flex-col xl:flex-row xl:justify-between xl:items-start gap-6 mb-8">
+      <main className="min-w-0 flex-1 p-6 xl:p-10">
+        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <div className="flex items-center gap-4">
-              <h1 className="text-4xl font-bold text-gray-900">
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold text-slate-900">
                 ผู้ใช้งาน
               </h1>
 
-              <span className="bg-red-100 text-red-600 px-4 py-2 rounded-lg text-sm font-semibold">
-                เฉพาะ Admin เท่านั้น
+              <span className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
+                <FaShieldAlt />
+                Admin
               </span>
             </div>
 
-            <p className="text-gray-500 mt-2">
-              Users &gt; จัดการผู้ใช้งานในระบบ
+            <p className="mt-2 text-slate-500">
+              เพิ่ม แก้ไข ปิดใช้งาน และจัดการสิทธิ์ผู้ใช้งานในระบบ
             </p>
           </div>
 
           <AccountHeader />
-        </div>
+        </header>
 
         {errorMessage && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-600">
-            {errorMessage}
-          </div>
+          <section className="mt-6 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
+            <FaExclamationTriangle className="mt-1 shrink-0" />
+            <p>{errorMessage}</p>
+          </section>
         )}
 
-        <div className="flex flex-wrap gap-3 mb-6">
-          <FilterButton
-            text="ทั้งหมด"
-            active={filter === "all"}
-            onClick={() => setFilter("all")}
-          />
-
-          <FilterButton
-            text="ใช้งานอยู่"
-            active={filter === "active"}
-            onClick={() => setFilter("active")}
-          />
-
-          <FilterButton
-            text="ไม่ใช้งาน"
-            active={filter === "inactive"}
-            onClick={() => setFilter("inactive")}
-          />
-
-          <FilterButton
-            text="Admin"
-            active={filter === "admin"}
-            onClick={() => setFilter("admin")}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 mb-6">
-          <Summary
-            title="พนักงานทั้งหมด"
-            value={`${users.length} คน`}
-            color="red"
-          />
-
-          <Summary
-            title="ใช้งานอยู่"
-            value={`${activeCount} คน`}
-            color="green"
-          />
-
-          <Summary
-            title="ไม่ใช้งาน"
-            value={`${inactiveCount} คน`}
-            color="orange"
-          />
-
-          <Summary
-            title="สิทธิ์ Admin"
-            value={`${adminCount} คน`}
-            color="blue"
-          />
-        </div>
-
-        <section className="bg-white rounded-3xl border shadow-sm p-6">
-          <div className="flex flex-col xl:flex-row xl:justify-between gap-4 mb-6">
-            <div className="relative w-full xl:w-[520px]">
-              <FaSearch className="absolute left-4 top-4 text-gray-400" />
-
-              <input
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="ค้นหาชื่อ, อีเมล, รหัสพนักงาน หรือเบอร์โทร"
-                className="w-full border rounded-xl pl-12 pr-5 py-3 text-gray-800 outline-none focus:border-red-500"
-              />
-            </div>
-
-            <div className="flex gap-3">
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                className="border px-5 py-3 rounded-xl flex items-center gap-2 text-gray-700 disabled:opacity-60"
+                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               >
                 <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
-                รีเฟรช
+                {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรช"}
               </button>
 
               <button
                 type="button"
                 onClick={openAddModal}
-                className="bg-red-600 text-white px-6 py-3 rounded-xl flex items-center gap-2"
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700"
               >
                 <FaPlus />
                 เพิ่มพนักงาน
               </button>
             </div>
+
+            <div className="relative w-full 2xl:w-[420px]">
+              <FaSearch className="absolute left-4 top-4 text-slate-400" />
+
+              <input
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="ค้นหาชื่อ อีเมล รหัสพนักงาน หรือเบอร์โทร"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-slate-800 outline-none focus:border-red-500 focus:bg-white"
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+          <SummaryCard
+            title="ผู้ใช้งานทั้งหมด"
+            value={`${users.length} คน`}
+            detail="บัญชีผู้ใช้งานในระบบ"
+            icon={<FaUsers />}
+            color="blue"
+          />
+
+          <SummaryCard
+            title="ใช้งานอยู่"
+            value={`${activeCount} คน`}
+            detail="สามารถเข้าสู่ระบบได้"
+            icon={<FaUserCheck />}
+            color="green"
+          />
+
+          <SummaryCard
+            title="ปิดใช้งาน"
+            value={`${inactiveCount} คน`}
+            detail="ไม่สามารถเข้าสู่ระบบได้"
+            icon={<FaUserSlash />}
+            color="orange"
+          />
+
+          <SummaryCard
+            title="สิทธิ์ Admin"
+            value={`${adminCount} คน`}
+            detail={`พนักงานทั่วไป ${userCount} คน`}
+            icon={<FaShieldAlt />}
+            color="red"
+          />
+        </section>
+
+        <section className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-4 border-b border-slate-100 p-6 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">
+                รายชื่อผู้ใช้งาน
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                แสดง {filteredUsers.length} จาก {users.length} บัญชี
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <FilterButton
+                active={filter === "all"}
+                onClick={() => setFilter("all")}
+              >
+                ทั้งหมด
+              </FilterButton>
+
+              <FilterButton
+                active={filter === "active"}
+                onClick={() => setFilter("active")}
+              >
+                ใช้งาน
+              </FilterButton>
+
+              <FilterButton
+                active={filter === "inactive"}
+                onClick={() => setFilter("inactive")}
+              >
+                ปิดใช้งาน
+              </FilterButton>
+
+              <FilterButton
+                active={filter === "admin"}
+                onClick={() => setFilter("admin")}
+              >
+                Admin
+              </FilterButton>
+
+              <FilterButton
+                active={filter === "user"}
+                onClick={() => setFilter("user")}
+              >
+                User
+              </FilterButton>
+            </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px]">
-              <thead className="bg-gray-100 text-gray-700">
-                <tr>
-                  <th className="p-4 text-left">#</th>
-                  <th className="p-4 text-left">รหัสพนักงาน</th>
-                  <th className="p-4 text-left">ชื่อ-นามสกุล</th>
-                  <th className="p-4 text-left">ตำแหน่ง</th>
-                  <th className="p-4 text-left">เบอร์โทร</th>
-                  <th className="p-4 text-left">อีเมล</th>
-                  <th className="p-4 text-left">สิทธิ์</th>
-                  <th className="p-4 text-left">สถานะ</th>
-                  <th className="p-4 text-left">วันที่เพิ่ม</th>
-                  <th className="p-4 text-left">จัดการ</th>
+            <table className="w-full min-w-[1200px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-slate-600">
+                  <th className="px-5 py-4 text-left font-semibold">#</th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    รหัสพนักงาน
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ชื่อ-นามสกุล
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ตำแหน่ง
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    เบอร์โทรศัพท์
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    อีเมล
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    สิทธิ์
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    สถานะ
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    วันที่เพิ่ม
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    จัดการ
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {filteredUsers.length > 0 ? (
-                  filteredUsers.map((user, index) => (
-                    <tr key={user.id} className="border-b text-gray-800">
-                      <td className="p-4">{index + 1}</td>
-
-                      <td className="p-4 font-semibold">
-                        {user.employee_code || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        {user.display_name || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        {user.position || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        {user.phone || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        {user.email || "-"}
-                      </td>
-
-                      <td className="p-4">
-                        <span className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-sm">
-                          {user.role === "admin" ? "Admin" : "User"}
-                        </span>
-                      </td>
-
-                      <td className="p-4">
-                        <span
-                          className={`px-3 py-1 rounded-lg text-sm ${
-                            user.is_active
-                              ? "bg-green-100 text-green-600"
-                              : "bg-red-100 text-red-600"
-                          }`}
-                        >
-                          {user.is_active ? "ใช้งาน" : "ไม่ใช้งาน"}
-                        </span>
-                      </td>
-
-                      <td className="p-4">
-                        {formatDate(user.created_at)}
-                      </td>
-
-                      <td className="p-4">
-                        <div className="flex gap-3">
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(user)}
-                            className="border rounded-lg p-3 hover:bg-gray-100"
-                            title="แก้ไข"
-                          >
-                            <FaEdit />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(user)}
-                            className="border rounded-lg p-3 text-red-600 hover:bg-red-50"
-                            title="ลบ"
-                          >
-                            <FaTrash />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
+                {isLoading && (
                   <tr>
-                    <td colSpan="10" className="p-12 text-center text-gray-500">
-                      {isLoading ? "กำลังโหลดข้อมูล..." : "ไม่พบผู้ใช้งาน"}
+                    <td
+                      colSpan="10"
+                      className="px-6 py-16 text-center text-slate-500"
+                    >
+                      กำลังโหลดข้อมูลผู้ใช้งาน...
+                    </td>
+                  </tr>
+                )}
+
+                {!isLoading &&
+                  filteredUsers.map((user, index) => {
+                    const isSelf =
+                      String(user.id) === String(currentUserId);
+
+                    return (
+                      <tr
+                        key={user.id}
+                        className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
+                      >
+                        <td className="px-5 py-4 text-slate-400">
+                          {index + 1}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span className="rounded-lg bg-slate-100 px-3 py-1.5 font-mono text-xs font-semibold text-slate-600">
+                            {user.employee_code || "-"}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {user.display_name || "-"}
+                            </p>
+
+                            {isSelf && (
+                              <span className="mt-1 inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                บัญชีของคุณ
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          {user.position || "-"}
+                        </td>
+
+                        <td className="px-5 py-4">{user.phone || "-"}</td>
+
+                        <td className="px-5 py-4">{user.email || "-"}</td>
+
+                        <td className="px-5 py-4">
+                          <RoleBadge role={user.role} />
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <StatusBadge isActive={isUserActive(user)} />
+                        </td>
+
+                        <td className="px-5 py-4 text-slate-500">
+                          {formatDate(user.created_at)}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <div className="flex justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(user)}
+                              className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-600 hover:bg-blue-100"
+                              title="แก้ไขผู้ใช้งาน"
+                            >
+                              <FaEdit />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(user)}
+                              disabled={isSelf}
+                              className={`rounded-xl border p-3 ${
+                                isSelf
+                                  ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                                  : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                              }`}
+                              title={
+                                isSelf
+                                  ? "ไม่สามารถลบบัญชีของตนเองได้"
+                                  : "ลบผู้ใช้งาน"
+                              }
+                            >
+                              <FaTrash />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                {!isLoading && filteredUsers.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan="10"
+                      className="px-6 py-16 text-center text-slate-500"
+                    >
+                      ไม่พบผู้ใช้งานตามเงื่อนไขที่ค้นหา
                     </td>
                   </tr>
                 )}
@@ -545,24 +720,24 @@ export default function UsersPage() {
       </main>
 
       {showModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <form
             onSubmit={handleSave}
-            className="bg-white w-full max-w-3xl rounded-3xl p-8 shadow-2xl relative"
+            className="relative max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white p-7 shadow-2xl md:p-8"
           >
             <button
               type="button"
               onClick={closeModal}
-              className="absolute right-6 top-6 text-gray-500 hover:text-red-600"
+              className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
               <FaTimes className="text-xl" />
             </button>
 
-            <h2 className="text-2xl font-bold text-gray-900">
+            <h2 className="text-2xl font-bold text-slate-900">
               {modalMode === "add" ? "เพิ่มพนักงาน" : "แก้ไขพนักงาน"}
             </h2>
 
-            <p className="text-gray-500 mt-2">
+            <p className="mt-1 text-slate-500">
               ข้อมูลจะบันทึกใน Supabase Auth และ profiles
             </p>
 
@@ -572,12 +747,13 @@ export default function UsersPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-6">
+            <div className="mt-7 grid grid-cols-1 gap-5 md:grid-cols-2">
               <Field
                 label="ชื่อ-นามสกุล"
                 name="display_name"
                 value={formData.display_name}
                 onChange={handleChange}
+                placeholder="เช่น สมชาย ใจดี"
               />
 
               <Field
@@ -593,6 +769,7 @@ export default function UsersPage() {
                 name="position"
                 value={formData.position}
                 onChange={handleChange}
+                placeholder="เช่น พนักงานขาย"
               />
 
               <Field
@@ -600,6 +777,7 @@ export default function UsersPage() {
                 name="phone"
                 value={formData.phone}
                 onChange={handleChange}
+                placeholder="เช่น 0812345678"
               />
 
               <Field
@@ -608,6 +786,7 @@ export default function UsersPage() {
                 type="email"
                 value={formData.email}
                 onChange={handleChange}
+                placeholder="เช่น user@email.com"
               />
 
               <Field
@@ -620,10 +799,15 @@ export default function UsersPage() {
                 type="password"
                 value={formData.password}
                 onChange={handleChange}
+                placeholder={
+                  modalMode === "add"
+                    ? "อย่างน้อย 8 ตัวอักษร"
+                    : "กรอกเมื่อต้องการเปลี่ยนรหัสผ่าน"
+                }
               />
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="mb-2 block text-sm font-medium text-slate-700">
                   สิทธิ์การใช้งาน
                 </label>
 
@@ -631,33 +815,43 @@ export default function UsersPage() {
                   name="role"
                   value={formData.role}
                   onChange={handleChange}
-                  className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+                  disabled={isEditingSelf}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500 disabled:cursor-not-allowed disabled:bg-slate-100"
                 >
-                  <option value="user">User</option>
-                  <option value="admin">Admin</option>
+                  <option value="user">User — พนักงานทั่วไป</option>
+                  <option value="admin">Admin — ผู้ดูแลระบบ</option>
                 </select>
               </div>
 
-              <label className="flex items-center gap-3 mt-8 cursor-pointer">
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
                 <input
                   type="checkbox"
                   name="is_active"
                   checked={formData.is_active}
                   onChange={handleChange}
-                  className="w-5 h-5 accent-red-600"
+                  disabled={isEditingSelf}
+                  className="h-5 w-5 accent-red-600 disabled:cursor-not-allowed"
                 />
 
-                <span className="text-gray-700">
-                  เปิดใช้งานบัญชีนี้
-                </span>
+                <div>
+                  <p className="font-medium text-slate-800">
+                    เปิดใช้งานบัญชีนี้
+                  </p>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    {isEditingSelf
+                      ? "บัญชีของคุณต้องเปิดใช้งานอยู่เสมอ"
+                      : "ปิดใช้งานแล้วผู้ใช้จะเข้าสู่ระบบไม่ได้"}
+                  </p>
+                </div>
               </label>
             </div>
 
-            <div className="flex justify-end gap-3 mt-8">
+            <div className="mt-8 flex justify-end gap-3">
               <button
                 type="button"
                 onClick={closeModal}
-                className="border px-5 py-3 rounded-xl text-gray-700"
+                className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
               >
                 ยกเลิก
               </button>
@@ -665,10 +859,10 @@ export default function UsersPage() {
               <button
                 type="submit"
                 disabled={isSaving}
-                className="bg-red-600 text-white px-5 py-3 rounded-xl flex items-center gap-2 disabled:bg-red-300"
+                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
               >
                 <FaSave />
-                {isSaving ? "กำลังบันทึก..." : "บันทึก"}
+                {isSaving ? "กำลังบันทึก..." : "บันทึกผู้ใช้งาน"}
               </button>
             </div>
           </form>
@@ -682,27 +876,61 @@ function Menu({ icon, text, href, active }) {
   return (
     <Link
       href={href}
-      className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl ${
-        active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
+      className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
+        active
+          ? "bg-red-600 text-white shadow-lg"
+          : "text-slate-200 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <span className="text-xl">{icon}</span>
-      <span>{text}</span>
+      <span className="text-lg">{icon}</span>
+      <span className="font-medium">{text}</span>
     </Link>
   );
 }
 
-function FilterButton({ text, active, onClick }) {
+function FilterButton({ children, active, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`px-5 py-3 rounded-xl ${
-        active ? "bg-red-600 text-white" : "bg-white border text-gray-700"
+      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+        active
+          ? "bg-red-600 text-white"
+          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
       }`}
     >
-      {text}
+      {children}
     </button>
+  );
+}
+
+function RoleBadge({ role }) {
+  const isAdmin = role === "admin";
+
+  return (
+    <span
+      className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+        isAdmin
+          ? "bg-red-100 text-red-700"
+          : "bg-blue-100 text-blue-700"
+      }`}
+    >
+      {getRoleLabel(role)}
+    </span>
+  );
+}
+
+function StatusBadge({ isActive }) {
+  return (
+    <span
+      className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+        isActive
+          ? "bg-emerald-100 text-emerald-700"
+          : "bg-slate-200 text-slate-600"
+      }`}
+    >
+      {isActive ? "ใช้งาน" : "ปิดใช้งาน"}
+    </span>
   );
 }
 
@@ -716,7 +944,7 @@ function Field({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-gray-700 mb-2">
+      <label className="mb-2 block text-sm font-medium text-slate-700">
         {label}
       </label>
 
@@ -726,31 +954,55 @@ function Field({
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="w-full border rounded-xl px-4 py-3 text-gray-800 outline-none focus:border-red-500"
+        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
       />
     </div>
   );
 }
 
-function Summary({ title, value, color }) {
-  const colors = {
-    red: "bg-red-100",
-    green: "bg-green-100",
-    orange: "bg-orange-100",
-    blue: "bg-blue-100",
+function SummaryCard({ title, value, detail, icon, color }) {
+  const styles = {
+    blue: {
+      icon: "bg-blue-100 text-blue-600",
+      line: "bg-blue-500",
+    },
+    green: {
+      icon: "bg-emerald-100 text-emerald-600",
+      line: "bg-emerald-500",
+    },
+    orange: {
+      icon: "bg-orange-100 text-orange-600",
+      line: "bg-orange-500",
+    },
+    red: {
+      icon: "bg-red-100 text-red-600",
+      line: "bg-red-500",
+    },
   };
 
+  const style = styles[color] || styles.blue;
+
   return (
-    <div className="bg-white rounded-3xl border shadow-sm p-6">
-      <div className={`w-14 h-14 rounded-2xl mb-4 ${colors[color]}`} />
+    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className={`absolute left-0 top-0 h-1 w-full ${style.line}`} />
 
-      <p className="font-bold text-gray-800">
-        {title}
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
 
-      <h2 className="text-3xl font-bold mt-2 text-gray-900">
-        {value}
-      </h2>
+          <h2 className="mt-3 text-3xl font-bold text-slate-900">
+            {value}
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500">{detail}</p>
+        </div>
+
+        <div
+          className={`flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${style.icon}`}
+        >
+          {icon}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,23 +1,29 @@
 "use client";
 
-import AccountHeader from "../components/AccountHeader";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { supabase } from "../lib/supabase";
+
+import AccountHeader from "../components/AccountHeader";
 import LogoutButton from "../components/LogoutButton";
+import { supabase } from "../lib/supabase";
+
 import {
-  FaHome,
-  FaBox,
-  FaThLarge,
-  FaShoppingCart,
-  FaUsers,
-  FaChartBar,
-  FaCalendarAlt,
   FaArrowRight,
+  FaBell,
+  FaBox,
+  FaBoxOpen,
+  FaBoxes,
   FaBriefcase,
+  FaCalendarAlt,
+  FaChartBar,
+  FaExclamationTriangle,
   FaFileAlt,
-  FaSyncAlt,
   FaHistory,
+  FaHome,
+  FaShoppingCart,
+  FaSyncAlt,
+  FaThLarge,
+  FaUsers,
 } from "react-icons/fa";
 
 function getLocalDateString(date = new Date()) {
@@ -30,7 +36,6 @@ function getLocalDateString(date = new Date()) {
 
 function getDaysAgoString(daysAgo) {
   const date = new Date();
-
   date.setDate(date.getDate() - daysAgo);
 
   return getLocalDateString(date);
@@ -73,6 +78,24 @@ function formatDateTime(value) {
   });
 }
 
+function getStockLevel(stock) {
+  const quantity = toNumber(stock);
+
+  if (quantity <= 0) return "out";
+  if (quantity < 10) return "low";
+
+  return "normal";
+}
+
+function getStockStatusText(stock) {
+  const level = getStockLevel(stock);
+
+  if (level === "out") return "สินค้าหมด";
+  if (level === "low") return "สินค้าใกล้หมด";
+
+  return "สต๊อกปกติ";
+}
+
 export default function DashboardPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -93,7 +116,7 @@ export default function DashboardPage() {
     ] = await Promise.all([
       supabase
         .from("products")
-        .select("id, name, stock, unit, status")
+        .select("id, product_code, name, stock, unit, status")
         .order("stock", { ascending: true }),
 
       supabase
@@ -137,16 +160,25 @@ export default function DashboardPage() {
   const today = getLocalDateString();
   const yesterday = getDaysAgoString(1);
 
+  const outOfStockProducts = useMemo(() => {
+    return products
+      .filter((product) => toNumber(product.stock) <= 0)
+      .sort((a, b) => a.name.localeCompare(b.name, "th"));
+  }, [products]);
+
   const lowStockProducts = useMemo(() => {
     return products
-      .filter(
-        (product) =>
-          product.status === "ใกล้หมด" ||
-          product.status === "หมด" ||
-          toNumber(product.stock) < 10
-      )
+      .filter((product) => {
+        const stock = toNumber(product.stock);
+
+        return stock > 0 && stock < 10;
+      })
       .sort((a, b) => toNumber(a.stock) - toNumber(b.stock));
   }, [products]);
+
+  const stockAlertProducts = useMemo(() => {
+    return [...outOfStockProducts, ...lowStockProducts];
+  }, [outOfStockProducts, lowStockProducts]);
 
   const todaySales = useMemo(() => {
     return sales
@@ -217,21 +249,31 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8f9fb] flex">
-      <aside className="w-[300px] shrink-0 bg-[#1f2633] text-white rounded-r-[45px] overflow-hidden print:hidden">
-        <div className="bg-red-600 p-8 rounded-br-[45px]">
-          <div className="text-3xl">🥤</div>
+    <div className="min-h-screen bg-slate-50 flex">
+      <aside className="w-[290px] shrink-0 min-h-screen bg-[#182232] text-white print:hidden">
+        <div className="bg-red-600 px-7 py-8 rounded-br-[42px] shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
+              🥤
+            </div>
 
-          <h2 className="font-bold mt-3">
-            ระบบบริหารจัดการ
-          </h2>
+            <div>
+              <h2 className="text-lg font-bold">
+                ระบบบริหารจัดการ
+              </h2>
 
-          <p className="text-sm">
-            ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
-          </p>
+              <p className="text-xs text-white/80">
+                ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
+              </p>
+            </div>
+          </div>
         </div>
 
-        <nav className="p-6 space-y-4">
+        <nav className="space-y-2 p-5">
+          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+            เมนูหลัก
+          </p>
+
           <Menu active icon={<FaHome />} text="Dashboard" href="/dashboard" />
 
           <Menu icon={<FaBox />} text="สินค้า" href="/products" />
@@ -254,68 +296,167 @@ export default function DashboardPage() {
             href="/stock-movements"
           />
 
-          <Menu
-            icon={<FaChartBar />}
-            text="รายงาน"
-            href="/reports"
-          />
+          <Menu icon={<FaChartBar />} text="รายงาน" href="/reports" />
 
-          <Menu
-            icon={<FaUsers />}
-            text="ผู้ใช้งาน"
-            href="/users"
-          />
+          <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
 
-          <LogoutButton />
+          <div className="pt-5">
+            <LogoutButton />
+          </div>
         </nav>
       </aside>
 
       <main className="flex-1 min-w-0 p-6 xl:p-10">
-        <div className="flex flex-col xl:flex-row xl:justify-between xl:items-start gap-6 mb-8">
+        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">
-              Dashboard
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-4xl font-bold text-slate-900">
+                Dashboard
+              </h1>
 
-            <p className="text-gray-500 mt-2">
-              ภาพรวมระบบ
+              {stockAlertProducts.length > 0 && (
+                <span className="inline-flex items-center gap-2 rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-600">
+                  <FaBell />
+                  แจ้งเตือน {stockAlertProducts.length}
+                </span>
+              )}
+            </div>
+
+            <p className="mt-2 text-slate-500">
+              ภาพรวมยอดขาย สินค้า และการแจ้งเตือนสต๊อก
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-4">
             <button
+              type="button"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="bg-white border px-5 py-3 rounded-xl flex items-center gap-2 text-gray-700 disabled:opacity-60"
+              className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
               <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
-
               {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
             </button>
 
             <AccountHeader />
           </div>
-        </div>
+        </header>
 
-        <div className="flex justify-end mb-6">
-          <div className="bg-white shadow-sm border rounded-xl px-5 py-3 flex items-center gap-3 text-gray-700">
+        <div className="mt-6 flex justify-end">
+          <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 shadow-sm">
             <FaCalendarAlt />
             <span>{formatThaiDate(today)}</span>
           </div>
         </div>
 
         {errorMessage && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-600">
+          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-red-600">
             {errorMessage}
           </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-6 mb-8">
+        {outOfStockProducts.length > 0 && (
+          <Link
+            href="/products"
+            className="mt-6 block rounded-3xl border border-red-200 bg-red-50 p-6 transition hover:bg-red-100"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-600 text-xl text-white">
+                  <FaExclamationTriangle />
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-bold text-red-700">
+                    สินค้าหมด {outOfStockProducts.length} รายการ
+                  </h2>
+
+                  <p className="mt-1 text-sm text-red-600">
+                    สินค้าเหลือ 0 ชิ้น กรุณารับสินค้าเข้าเพื่อให้สามารถขายได้
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {outOfStockProducts.slice(0, 5).map((product) => (
+                      <span
+                        key={product.id}
+                        className="rounded-full bg-white px-3 py-1 text-sm font-medium text-red-700"
+                      >
+                        {product.name}
+                      </span>
+                    ))}
+
+                    {outOfStockProducts.length > 5 && (
+                      <span className="rounded-full bg-white px-3 py-1 text-sm font-medium text-red-700">
+                        และอีก {outOfStockProducts.length - 5} รายการ
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <span className="flex items-center gap-2 font-medium text-red-700">
+                ไปหน้าสินค้า
+                <FaArrowRight />
+              </span>
+            </div>
+          </Link>
+        )}
+
+        {lowStockProducts.length > 0 && (
+          <Link
+            href="/products"
+            className="mt-4 block rounded-3xl border border-orange-200 bg-orange-50 p-6 transition hover:bg-orange-100"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-orange-500 text-xl text-white">
+                  <FaExclamationTriangle />
+                </div>
+
+                <div>
+                  <h2 className="text-xl font-bold text-orange-700">
+                    สินค้าใกล้หมด {lowStockProducts.length} รายการ
+                  </h2>
+
+                  <p className="mt-1 text-sm text-orange-600">
+                    สินค้าเหลือ 1–9 ชิ้น ควรวางแผนรับสินค้าเข้าเพิ่ม
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {lowStockProducts.slice(0, 5).map((product) => (
+                      <span
+                        key={product.id}
+                        className="rounded-full bg-white px-3 py-1 text-sm font-medium text-orange-700"
+                      >
+                        {product.name} ({toNumber(product.stock)}{" "}
+                        {product.unit || "ชิ้น"})
+                      </span>
+                    ))}
+
+                    {lowStockProducts.length > 5 && (
+                      <span className="rounded-full bg-white px-3 py-1 text-sm font-medium text-orange-700">
+                        และอีก {lowStockProducts.length - 5} รายการ
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <span className="flex items-center gap-2 font-medium text-orange-700">
+                ตรวจสอบสินค้า
+                <FaArrowRight />
+              </span>
+            </div>
+          </Link>
+        )}
+
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-5">
           <Card
-            title="จำนวนสินค้าทั้งหมด"
+            title="สินค้าทั้งหมด"
             value={products.length.toLocaleString()}
             unit="รายการ"
-            color="red"
+            color="blue"
+            icon={<FaBoxes />}
             href="/products"
             footer="ดูหน้าสินค้า"
           />
@@ -325,17 +466,29 @@ export default function DashboardPage() {
             value={categories.length.toLocaleString()}
             unit="หมวดหมู่"
             color="gray"
+            icon={<FaThLarge />}
             href="/categories"
             footer="ดูหมวดหมู่"
+          />
+
+          <Card
+            title="สินค้าหมด"
+            value={outOfStockProducts.length.toLocaleString()}
+            unit="รายการ"
+            color="red"
+            icon={<FaExclamationTriangle />}
+            href="/products"
+            footer="ต้องรับสินค้าเข้า"
           />
 
           <Card
             title="สินค้าใกล้หมด"
             value={lowStockProducts.length.toLocaleString()}
             unit="รายการ"
-            color="yellow"
+            color="orange"
+            icon={<FaBoxOpen />}
             href="/products"
-            footer="ตรวจสอบสต๊อก"
+            footer="เหลือ 1–9 ชิ้น"
           />
 
           <Card
@@ -343,37 +496,38 @@ export default function DashboardPage() {
             value={`฿ ${formatMoney(todaySales)}`}
             unit=""
             color="green"
+            icon={<FaShoppingCart />}
             href="/sales"
             footer={`${todayBillCount} บิลขายวันนี้`}
           />
-        </div>
+        </section>
 
-        <div className="grid grid-cols-1 2xl:grid-cols-3 gap-6 mb-8">
-          <div className="2xl:col-span-2 bg-white rounded-3xl shadow-sm border p-6">
-            <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4">
+        <section className="mt-8 grid grid-cols-1 gap-6 2xl:grid-cols-3">
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm 2xl:col-span-2">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
-                <h2 className="text-xl font-bold text-gray-900">
+                <h2 className="text-xl font-bold text-slate-900">
                   ยอดขาย 7 วันล่าสุด
                 </h2>
 
-                <p className="text-3xl font-bold text-red-600 mt-4">
+                <p className="mt-4 text-3xl font-bold text-red-600">
                   ฿ {formatMoney(todaySales)}
                 </p>
 
-                <p className="text-gray-500 mt-2">
+                <p className="mt-2 text-slate-500">
                   {comparisonText}
                 </p>
               </div>
 
               <Link
                 href="/reports"
-                className="text-red-600 border border-red-200 px-4 py-2 rounded-xl text-sm"
+                className="rounded-xl border border-red-200 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
               >
                 ดูรายงานยอดขาย
               </Link>
             </div>
 
-            <div className="mt-8 h-64 flex items-end gap-3 px-2 pb-6 border-b">
+            <div className="mt-8 flex h-64 items-end gap-3 border-b px-2 pb-6">
               {dailySales.map((item) => {
                 const height = Math.max(
                   8,
@@ -383,23 +537,23 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={item.date}
-                    className="flex-1 h-full flex flex-col justify-end items-center gap-2"
+                    className="flex h-full flex-1 flex-col items-center justify-end gap-2"
                   >
-                    <span className="text-xs text-gray-400">
+                    <span className="text-xs text-slate-400">
                       {item.amount > 0
                         ? `฿${toNumber(item.amount).toLocaleString("th-TH")}`
                         : "-"}
                     </span>
 
                     <div
-                      className="w-full bg-red-500 rounded-t-xl"
+                      className="w-full rounded-t-xl bg-red-500"
                       style={{ height: `${height}%` }}
                       title={`${formatThaiDate(item.date)}: ${formatMoney(
                         item.amount
                       )} บาท`}
                     />
 
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-slate-500">
                       {item.label}
                     </span>
                   </div>
@@ -408,61 +562,84 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-3xl shadow-sm border p-6">
-            <div className="flex justify-between items-center mb-5">
-              <h2 className="text-xl font-bold text-gray-900">
-                สินค้าใกล้หมด
-              </h2>
+          <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  แจ้งเตือนสต๊อก
+                </h2>
 
-              <Link href="/products" className="text-red-600 text-sm">
+                <p className="mt-1 text-sm text-slate-500">
+                  สินค้าที่ต้องตรวจสอบ
+                </p>
+              </div>
+
+              <Link href="/products" className="text-sm text-red-600">
                 ดูทั้งหมด
               </Link>
             </div>
 
-            {lowStockProducts.length > 0 ? (
-              lowStockProducts.slice(0, 5).map((item) => (
-                <div
-                  key={item.id}
-                  className="flex justify-between gap-4 items-center py-4 border-b last:border-b-0"
-                >
-                  <div>
-                    <p className="font-medium text-gray-800">
-                      {item.name}
-                    </p>
+            {stockAlertProducts.length > 0 ? (
+              stockAlertProducts.slice(0, 5).map((item) => {
+                const level = getStockLevel(item.stock);
+                const isOut = level === "out";
 
-                    <p className="text-xs text-gray-400 mt-1">
-                      สถานะ: {item.status || "มีสินค้า"}
-                    </p>
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-4 border-b border-slate-100 py-4 last:border-b-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-slate-800">
+                        {item.name}
+                      </p>
+
+                      <p className="mt-1 text-xs text-slate-400">
+                        {item.product_code || "-"} · {getStockStatusText(item.stock)}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`shrink-0 rounded-full px-3 py-1 text-sm font-bold ${
+                        isOut
+                          ? "bg-red-100 text-red-600"
+                          : "bg-orange-100 text-orange-600"
+                      }`}
+                    >
+                      {toNumber(item.stock)} {item.unit || "ชิ้น"}
+                    </span>
                   </div>
-
-                  <p className="text-red-600 font-bold whitespace-nowrap">
-                    {toNumber(item.stock)} {item.unit || "ชิ้น"}
-                  </p>
-                </div>
-              ))
+                );
+              })
             ) : (
-              <div className="h-56 flex items-center justify-center text-gray-500">
-                สต๊อกสินค้าปกติ
+              <div className="flex h-56 flex-col items-center justify-center text-center text-slate-500">
+                <FaBoxOpen className="mb-3 text-4xl text-emerald-500" />
+                <p className="font-medium text-slate-700">
+                  สต๊อกสินค้าปกติ
+                </p>
+                <p className="mt-1 text-sm">
+                  ไม่มีสินค้าที่หมดหรือใกล้หมด
+                </p>
               </div>
             )}
           </div>
-        </div>
+        </section>
 
-        <div className="bg-white rounded-3xl shadow-sm border p-6 mb-8">
-          <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-5">
+        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">
+              <h2 className="text-2xl font-bold text-slate-900">
                 รายการขายล่าสุด
               </h2>
 
-              <p className="text-gray-500 mt-1">
+              <p className="mt-1 text-slate-500">
                 ข้อมูลจากรายการขายที่บันทึกในระบบ
               </p>
             </div>
 
             <Link
               href="/reports"
-              className="border px-5 py-2 rounded-xl text-gray-700"
+              className="rounded-xl border border-slate-200 px-5 py-2 text-slate-700 hover:bg-slate-50"
             >
               ดูรายงานทั้งหมด
             </Link>
@@ -470,7 +647,7 @@ export default function DashboardPage() {
 
           <div className="overflow-x-auto">
             <table className="w-full min-w-[850px]">
-              <thead className="bg-gray-100 text-gray-700">
+              <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="p-4 text-left">#</th>
                   <th className="p-4 text-left">วันที่ / เวลา</th>
@@ -483,13 +660,16 @@ export default function DashboardPage() {
               <tbody>
                 {recentSales.length > 0 ? (
                   recentSales.map((sale, index) => (
-                    <tr key={sale.id} className="border-b text-gray-800">
+                    <tr
+                      key={sale.id}
+                      className="border-b border-slate-100 text-slate-800"
+                    >
                       <td className="p-4">{index + 1}</td>
 
                       <td className="p-4">
                         <div>{formatThaiDate(sale.sale_date)}</div>
 
-                        <div className="text-xs text-gray-400 mt-1">
+                        <div className="mt-1 text-xs text-slate-400">
                           {formatDateTime(sale.created_at)}
                         </div>
                       </td>
@@ -511,7 +691,7 @@ export default function DashboardPage() {
                   <tr>
                     <td
                       colSpan="5"
-                      className="p-10 text-center text-gray-500"
+                      className="p-10 text-center text-slate-500"
                     >
                       {isLoading
                         ? "กำลังโหลดข้อมูล..."
@@ -522,55 +702,55 @@ export default function DashboardPage() {
               </tbody>
             </table>
           </div>
-        </div>
+        </section>
 
-        <div className="grid grid-cols-1 2xl:grid-cols-2 gap-6">
+        <section className="mt-8 grid grid-cols-1 gap-6 2xl:grid-cols-2">
           <Link
             href="/products"
-            className="bg-red-50 border border-red-100 rounded-3xl p-8 flex items-center justify-between hover:bg-red-100"
+            className="flex items-center justify-between rounded-3xl border border-red-100 bg-red-50 p-8 transition hover:bg-red-100"
           >
             <div className="flex items-center gap-5">
-              <div className="w-20 h-20 bg-red-600 text-white rounded-full flex items-center justify-center text-3xl">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-red-600 text-3xl text-white">
                 <FaBriefcase />
               </div>
 
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">
+                <h2 className="text-2xl font-bold text-slate-900">
                   ไปหน้าสินค้า
                 </h2>
 
-                <p className="text-gray-500">
-                  จัดการสินค้า เพิ่ม / แก้ไข / ลบ
+                <p className="text-slate-500">
+                  จัดการสินค้า เพิ่ม แก้ไข ลบ และตรวจสอบสต๊อก
                 </p>
               </div>
             </div>
 
-            <FaArrowRight className="text-red-600 text-2xl" />
+            <FaArrowRight className="text-2xl text-red-600" />
           </Link>
 
           <Link
             href="/reports"
-            className="bg-white border rounded-3xl p-8 flex items-center justify-between hover:bg-gray-100"
+            className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white p-8 transition hover:bg-slate-50"
           >
             <div className="flex items-center gap-5">
-              <div className="w-20 h-20 bg-gray-800 text-white rounded-full flex items-center justify-center text-3xl">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-800 text-3xl text-white">
                 <FaFileAlt />
               </div>
 
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">
+                <h2 className="text-2xl font-bold text-slate-900">
                   ไปหน้ารายงาน
                 </h2>
 
-                <p className="text-gray-500">
+                <p className="text-slate-500">
                   ดูรายงานยอดขายและสรุปข้อมูล
                 </p>
               </div>
             </div>
 
-            <FaArrowRight className="text-gray-700 text-2xl" />
+            <FaArrowRight className="text-2xl text-slate-700" />
           </Link>
-        </div>
+        </section>
       </main>
     </div>
   );
@@ -580,45 +760,81 @@ function Menu({ icon, text, href, active }) {
   return (
     <Link
       href={href}
-      className={`w-full flex items-center gap-4 px-5 py-4 rounded-xl ${
-        active ? "bg-red-600 shadow-lg" : "hover:bg-white/10"
+      className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
+        active
+          ? "bg-red-600 text-white shadow-lg"
+          : "text-slate-200 hover:bg-white/10 hover:text-white"
       }`}
     >
-      <span className="text-xl">{icon}</span>
-      <span>{text}</span>
+      <span className="text-lg">{icon}</span>
+      <span className="font-medium">{text}</span>
     </Link>
   );
 }
 
-function Card({ title, value, unit, color, href, footer }) {
-  const style = {
-    red: "bg-red-600 text-red-600",
-    gray: "bg-gray-500 text-gray-600",
-    yellow: "bg-yellow-400 text-yellow-500",
-    green: "bg-green-500 text-green-600",
+function Card({ title, value, unit, color, icon, href, footer }) {
+  const styles = {
+    blue: {
+      icon: "bg-blue-100 text-blue-600",
+      number: "text-blue-600",
+      footer: "bg-blue-50 text-blue-600",
+    },
+    gray: {
+      icon: "bg-slate-100 text-slate-600",
+      number: "text-slate-700",
+      footer: "bg-slate-50 text-slate-600",
+    },
+    red: {
+      icon: "bg-red-100 text-red-600",
+      number: "text-red-600",
+      footer: "bg-red-50 text-red-600",
+    },
+    orange: {
+      icon: "bg-orange-100 text-orange-600",
+      number: "text-orange-600",
+      footer: "bg-orange-50 text-orange-600",
+    },
+    green: {
+      icon: "bg-emerald-100 text-emerald-600",
+      number: "text-emerald-600",
+      footer: "bg-emerald-50 text-emerald-600",
+    },
   };
 
-  const [bg, text] = style[color].split(" ");
+  const style = styles[color] || styles.blue;
 
   return (
     <Link
       href={href}
-      className="bg-white rounded-3xl shadow-sm border overflow-hidden hover:shadow-md transition-shadow"
+      className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
     >
       <div className="p-6">
-        <div className={`w-16 h-16 ${bg} rounded-full mb-4`} />
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="font-medium text-slate-600">{title}</p>
 
-        <p className="font-semibold text-gray-800">{title}</p>
+            <div className="mt-3 flex items-end gap-2">
+              <h2 className={`text-3xl font-bold ${style.number}`}>
+                {value}
+              </h2>
 
-        <div className="flex items-end gap-2 mt-2">
-          <h2 className={`text-3xl font-bold ${text}`}>{value}</h2>
-          <span className="text-gray-500">{unit}</span>
+              <span className="text-slate-500">{unit}</span>
+            </div>
+          </div>
+
+          <div
+            className={`flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${style.icon}`}
+          >
+            {icon}
+          </div>
         </div>
       </div>
 
-      <div className="bg-red-50 px-6 py-4 flex justify-between text-sm text-red-600">
+      <div
+        className={`flex items-center justify-between px-6 py-3 text-sm ${style.footer}`}
+      >
         <span>{footer}</span>
-        <span>›</span>
+        <FaArrowRight />
       </div>
     </Link>
   );
