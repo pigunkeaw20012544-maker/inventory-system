@@ -56,7 +56,6 @@ export default function AdminDailySalesSubmissions() {
         report_date,
         bill_count,
         item_quantity,
-        discount_amount,
         total_amount,
         submitted_at,
         seen_at
@@ -75,10 +74,10 @@ export default function AdminDailySalesSubmissions() {
   }
 
   useEffect(() => {
-    loadSubmissions();
+    void loadSubmissions();
 
     const channel = supabase
-      .channel(`admin-sales-submissions-${today}`)
+      .channel(`admin-stock-out-submissions-${today}`)
       .on(
         "postgres_changes",
         {
@@ -113,7 +112,7 @@ export default function AdminDailySalesSubmissions() {
 
     if (error) {
       console.error(error);
-      alert(error.message || "ไม่สามารถรับทราบยอดขายได้");
+      alert(error.message || "ไม่สามารถรับทราบรายการตัดสต็อกได้");
       return;
     }
 
@@ -121,14 +120,14 @@ export default function AdminDailySalesSubmissions() {
   }
 
   return (
-    <section className="bg-white rounded-3xl border shadow-sm p-6 mb-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <section className="mb-6 rounded-3xl border bg-white p-6 shadow-sm">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
-          <div className="relative w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center">
+          <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
             <FaBell className="text-xl" />
 
             {unreadCount > 0 && (
-              <span className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-600 text-white text-xs flex items-center justify-center">
+              <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-xs text-white">
                 {unreadCount}
               </span>
             )}
@@ -136,11 +135,11 @@ export default function AdminDailySalesSubmissions() {
 
           <div>
             <h2 className="text-2xl font-bold text-gray-900">
-              ยอดส่งจากพนักงานวันนี้
+              รายการตัดสต็อกจากพนักงานวันนี้
             </h2>
 
-            <p className="text-gray-500 mt-1">
-              รายการที่ User ส่งเข้าระบบโดยตรง
+            <p className="mt-1 text-gray-500">
+              รายการที่พนักงานส่งเข้าระบบโดยตรง
             </p>
           </div>
         </div>
@@ -149,24 +148,23 @@ export default function AdminDailySalesSubmissions() {
           type="button"
           onClick={loadSubmissions}
           disabled={isLoading}
-          className="border rounded-xl px-5 py-3 flex items-center gap-2 text-gray-700 disabled:opacity-60"
+          className="flex items-center gap-2 rounded-xl border px-5 py-3 text-gray-700 disabled:opacity-60"
         >
           <FaSyncAlt className={isLoading ? "animate-spin" : ""} />
-          รีเฟรชยอดส่ง
+          รีเฟรชรายการ
         </button>
       </div>
 
       <div className="mt-6 overflow-x-auto">
-        <table className="w-full min-w-[900px]">
+        <table className="w-full min-w-[800px]">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="p-4 text-left">รหัสพนักงาน</th>
               <th className="p-4 text-left">ชื่อพนักงาน</th>
-              <th className="p-4 text-left">จำนวนบิล</th>
+              <th className="p-4 text-left">จำนวนรายการ</th>
               <th className="p-4 text-left">จำนวนสินค้า</th>
-              <th className="p-4 text-left">ส่วนลด</th>
-              <th className="p-4 text-left">ยอดสุทธิ</th>
-              <th className="p-4 text-left">เวลาส่งยอด</th>
+              <th className="p-4 text-left">มูลค่ารวม</th>
+              <th className="p-4 text-left">เวลาส่งรายการ</th>
               <th className="p-4 text-left">สถานะ</th>
             </tr>
           </thead>
@@ -181,13 +179,9 @@ export default function AdminDailySalesSubmissions() {
 
                   <td className="p-4">{item.employee_name}</td>
 
-                  <td className="p-4">{item.bill_count} บิล</td>
+                  <td className="p-4">{item.bill_count} รายการ</td>
 
                   <td className="p-4">{item.item_quantity} ชิ้น</td>
-
-                  <td className="p-4">
-                    {formatMoney(item.discount_amount)} บาท
-                  </td>
 
                   <td className="p-4 font-bold text-red-600">
                     {formatMoney(item.total_amount)} บาท
@@ -213,7 +207,7 @@ export default function AdminDailySalesSubmissions() {
                         <FaEye />
                         {markingId === item.id
                           ? "กำลังบันทึก..."
-                          : "รับทราบยอด"}
+                          : "รับทราบรายการ"}
                       </button>
                     )}
                   </td>
@@ -222,12 +216,12 @@ export default function AdminDailySalesSubmissions() {
             ) : (
               <tr>
                 <td
-                  colSpan="8"
+                  colSpan="7"
                   className="p-10 text-center text-gray-500"
                 >
                   {isLoading
                     ? "กำลังโหลดข้อมูล..."
-                    : "วันนี้ยังไม่มีพนักงานส่งยอด"}
+                    : "วันนี้ยังไม่มีพนักงานส่งรายการตัดสต็อก"}
                 </td>
               </tr>
             )}

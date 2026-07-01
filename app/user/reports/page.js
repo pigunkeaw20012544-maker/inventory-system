@@ -120,10 +120,8 @@ function csvCell(value) {
 }
 
 export default function UserReportsPage() {
-  const today = getLocalDateString();
-
   const [reportType, setReportType] = useState("daily");
-  const [selectedDate, setSelectedDate] = useState(today);
+  const [selectedDate, setSelectedDate] = useState(getLocalDateString());
   const [selectedMonth, setSelectedMonth] = useState(getMonthValue());
   const [selectedYear, setSelectedYear] = useState(
     String(new Date().getFullYear())
@@ -157,7 +155,6 @@ export default function UserReportsPage() {
           sale_date,
           seller_name,
           note,
-          discount_amount,
           total_amount,
           created_at
         `)
@@ -183,7 +180,6 @@ export default function UserReportsPage() {
             product_name,
             quantity,
             price,
-            discount,
             subtotal
           `)
           .in("sale_id", saleIds);
@@ -211,7 +207,7 @@ export default function UserReportsPage() {
     void loadReport();
 
     const channel = supabase
-      .channel("user-reports-live")
+      .channel("user-stock-out-reports-live")
       .on(
         "postgres_changes",
         {
@@ -258,13 +254,8 @@ export default function UserReportsPage() {
   }, [saleItems]);
 
   const totals = useMemo(() => {
-    const totalSales = sales.reduce(
+    const totalValue = sales.reduce(
       (sum, sale) => sum + toNumber(sale.total_amount),
-      0
-    );
-
-    const totalDiscount = sales.reduce(
-      (sum, sale) => sum + toNumber(sale.discount_amount),
       0
     );
 
@@ -274,8 +265,7 @@ export default function UserReportsPage() {
     );
 
     return {
-      totalSales,
-      totalDiscount,
+      totalValue,
       totalQuantity,
     };
   }, [sales, saleItems]);
@@ -309,12 +299,12 @@ export default function UserReportsPage() {
 
   const chartData = useMemo(() => {
     const grouped = sales.reduce((result, sale) => {
-      const saleDate = String(sale.sale_date || "");
+      const stockOutDate = String(sale.sale_date || "");
 
       const label =
         reportType === "yearly"
-          ? saleDate.slice(0, 7)
-          : saleDate;
+          ? stockOutDate.slice(0, 7)
+          : stockOutDate;
 
       if (!label) {
         return result;
@@ -351,19 +341,18 @@ export default function UserReportsPage() {
 
   function exportCsv() {
     if (sales.length === 0) {
-      alert("ไม่มีข้อมูลการขายสำหรับ Export");
+      alert("ไม่มีข้อมูลสำหรับ Export");
       return;
     }
 
     const rows = [
       [
-        "วันที่ขาย",
-        "เลขที่บิล",
-        "พนักงานขาย",
+        "วันที่ตัดสต็อก",
+        "เลขที่รายการ",
+        "ผู้ดำเนินการ",
         "จำนวนสินค้า",
         "จำนวนรายการ",
-        "ส่วนลด",
-        "ยอดสุทธิ",
+        "มูลค่ารวม",
         "หมายเหตุ",
       ],
       ...sales.map((sale) => {
@@ -378,7 +367,6 @@ export default function UserReportsPage() {
           sale.seller_name || "-",
           itemSummary.quantity,
           itemSummary.lines,
-          formatMoney(sale.discount_amount),
           formatMoney(sale.total_amount),
           sale.note || "",
         ];
@@ -396,12 +384,16 @@ export default function UserReportsPage() {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `user-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
+    link.download = `stock-out-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
+
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
 
     URL.revokeObjectURL(url);
   }
-    return (
+
+  return (
     <div className="min-h-screen bg-slate-50 flex">
       <aside className="print:hidden w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
@@ -426,12 +418,15 @@ export default function UserReportsPage() {
           </p>
 
           <Menu icon={<FaHome />} text="หน้าหลัก" href="/user/dashboard" />
+
           <Menu icon={<FaBox />} text="สินค้า" href="/user/products" />
+
           <Menu
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/user/sales"
           />
+
           <Menu
             active
             icon={<FaChartBar />}
@@ -450,7 +445,7 @@ export default function UserReportsPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                รายงาน
+                รายงานตัดสต็อก
               </h1>
 
               <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
@@ -459,7 +454,7 @@ export default function UserReportsPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              รายงานยอดขายรายวัน รายเดือน และรายปี
+              รายงานรายการเบิก/ตัดสต็อกรายวัน รายเดือน และรายปี
             </p>
           </div>
 
@@ -475,21 +470,21 @@ export default function UserReportsPage() {
             <PeriodButton
               active={reportType === "daily"}
               title="รายวัน"
-              detail="ดูยอดขายของวันที่เลือก"
+              detail="ดูรายการของวันที่เลือก"
               onClick={() => setReportType("daily")}
             />
 
             <PeriodButton
               active={reportType === "monthly"}
               title="รายเดือน"
-              detail="ดูยอดขายรวมทั้งเดือน"
+              detail="ดูรายการรวมทั้งเดือน"
               onClick={() => setReportType("monthly")}
             />
 
             <PeriodButton
               active={reportType === "yearly"}
               title="รายปี"
-              detail="ดูยอดขายรวมทั้งปี"
+              detail="ดูรายการรวมทั้งปี"
               onClick={() => setReportType("yearly")}
             />
           </div>
@@ -566,44 +561,44 @@ export default function UserReportsPage() {
           </h2>
 
           <p className="mt-1 text-slate-500">
-            สรุปยอดขายตามช่วงเวลาที่เลือก
+            สรุปรายการเบิก/ตัดสต็อกตามช่วงเวลาที่เลือก
           </p>
         </section>
 
         <section className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
-            title="ยอดขายรวม"
-            value={`${formatMoney(totals.totalSales)} บาท`}
-            detail={`${sales.length.toLocaleString()} บิลขาย`}
+            title="มูลค่ารวม"
+            value={`${formatMoney(totals.totalValue)} บาท`}
+            detail={`${sales.length.toLocaleString()} รายการ`}
             color="red"
           />
 
           <SummaryCard
-            title="จำนวนสินค้าที่ขาย"
+            title="จำนวนสินค้าที่ตัด"
             value={`${totals.totalQuantity.toLocaleString()} ชิ้น`}
-            detail={`ส่วนลดรวม ${formatMoney(totals.totalDiscount)} บาท`}
+            detail="รวมจำนวนสินค้าทุกรายการ"
             color="orange"
           />
 
           <SummaryCard
-            title="สินค้าขายดี"
+            title="สินค้าถูกตัดมากสุด"
             value={topProducts[0]?.name || "-"}
             detail={
               topProducts[0]
-                ? `ขายแล้ว ${topProducts[0].quantity.toLocaleString()} ชิ้น`
+                ? `จำนวน ${topProducts[0].quantity.toLocaleString()} ชิ้น`
                 : "ยังไม่มีข้อมูล"
             }
             color="green"
           />
 
           <SummaryCard
-            title="ยอดเฉลี่ยต่อบิล"
+            title="มูลค่าเฉลี่ยต่อรายการ"
             value={`${formatMoney(
               sales.length > 0
-                ? totals.totalSales / sales.length
+                ? totals.totalValue / sales.length
                 : 0
             )} บาท`}
-            detail="คำนวณจากยอดสุทธิ"
+            detail="คำนวณจากมูลค่ารวม"
             color="blue"
           />
         </section>
@@ -611,11 +606,11 @@ export default function UserReportsPage() {
         <section className="mt-8 grid grid-cols-1 gap-6 2xl:grid-cols-3">
           <div className="2xl:col-span-2 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-2xl font-bold text-slate-900">
-              กราฟยอดขาย
+              กราฟมูลค่าการตัดสต็อก
             </h2>
 
             <p className="mt-1 text-slate-500">
-              แสดงยอดขายตามช่วงเวลาที่เลือก
+              แสดงมูลค่ารวมตามช่วงเวลาที่เลือก
             </p>
 
             {chartData.length > 0 ? (
@@ -637,7 +632,7 @@ export default function UserReportsPage() {
                       className="flex h-full min-w-16 flex-1 flex-col items-center justify-end gap-2"
                     >
                       <span className="whitespace-nowrap text-xs text-slate-500">
-                        {formatMoney(item.amount)}
+                        ฿ {formatMoney(item.amount)}
                       </span>
 
                       <div
@@ -654,14 +649,14 @@ export default function UserReportsPage() {
               </div>
             ) : (
               <div className="mt-6 flex h-72 items-center justify-center rounded-2xl bg-slate-50 text-slate-500">
-                ยังไม่มีข้อมูลยอดขายในช่วงนี้
+                ยังไม่มีข้อมูลในช่วงนี้
               </div>
             )}
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-2xl font-bold text-slate-900">
-              สินค้าขายดี
+              สินค้าถูกตัดมากสุด
             </h2>
 
             <div className="mt-5 space-y-4">
@@ -693,7 +688,9 @@ export default function UserReportsPage() {
                   </div>
                 ))
               ) : (
-                <p className="text-slate-500">ยังไม่มีรายการขาย</p>
+                <p className="text-slate-500">
+                  ยังไม่มีรายการตัดสต็อก
+                </p>
               )}
             </div>
           </div>
@@ -703,11 +700,11 @@ export default function UserReportsPage() {
           <div className="flex flex-col gap-3 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                รายการขาย
+                รายการตัดสต็อก
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                แสดงรายการขายรวมตามช่วงเวลาที่เลือก
+                แสดงรายการตามช่วงเวลาที่เลือก
               </p>
             </div>
 
@@ -717,7 +714,7 @@ export default function UserReportsPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1050px] text-sm">
+            <table className="w-full min-w-[960px] text-sm">
               <thead>
                 <tr className="bg-slate-50 text-slate-600">
                   <th className="px-5 py-4 text-left font-semibold">#</th>
@@ -725,19 +722,16 @@ export default function UserReportsPage() {
                     วันที่ / เวลา
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
-                    เลขที่บิล
+                    เลขที่รายการ
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
-                    พนักงานขาย
+                    ผู้ดำเนินการ
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
                     จำนวนสินค้า
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
-                    ส่วนลด
-                  </th>
-                  <th className="px-5 py-4 text-left font-semibold">
-                    ยอดสุทธิ
+                    มูลค่ารวม
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
                     หมายเหตุ
@@ -784,10 +778,6 @@ export default function UserReportsPage() {
                           </span>
                         </td>
 
-                        <td className="px-5 py-4">
-                          {formatMoney(sale.discount_amount)} บาท
-                        </td>
-
                         <td className="px-5 py-4 font-bold text-red-600">
                           {formatMoney(sale.total_amount)} บาท
                         </td>
@@ -801,10 +791,10 @@ export default function UserReportsPage() {
                 ) : (
                   <tr>
                     <td
-                      colSpan="8"
+                      colSpan="7"
                       className="px-6 py-16 text-center text-slate-500"
                     >
-                      ยังไม่มีรายการขายในช่วงเวลาที่เลือก
+                      ยังไม่มีรายการตัดสต็อกในช่วงเวลาที่เลือก
                     </td>
                   </tr>
                 )}

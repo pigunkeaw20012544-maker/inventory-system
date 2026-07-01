@@ -165,7 +165,6 @@ export default function ReportsPage() {
           sale_date,
           seller_name,
           note,
-          discount_amount,
           total_amount,
           created_at
         `)
@@ -223,7 +222,6 @@ export default function ReportsPage() {
           product_name,
           quantity,
           price,
-          discount,
           subtotal
         `)
         .in("sale_id", saleIds);
@@ -231,7 +229,7 @@ export default function ReportsPage() {
       if (error) {
         console.error(error);
         setErrorMessage(
-          error.message || "โหลดรายการสินค้าในบิลไม่สำเร็จ"
+          error.message || "โหลดรายการสินค้าในรายการตัดสต็อกไม่สำเร็จ"
         );
       } else {
         itemList = data || [];
@@ -289,7 +287,7 @@ export default function ReportsPage() {
     }, {});
   }, [saleItems]);
 
-  const totalSales = useMemo(() => {
+  const totalValue = useMemo(() => {
     return sales.reduce(
       (sum, sale) => sum + toNumber(sale.total_amount),
       0
@@ -303,18 +301,11 @@ export default function ReportsPage() {
     );
   }, [saleItems]);
 
-  const totalDiscount = useMemo(() => {
-    return sales.reduce(
-      (sum, sale) => sum + toNumber(sale.discount_amount),
-      0
-    );
-  }, [sales]);
-
-  const averagePerBill = useMemo(() => {
+  const averagePerRecord = useMemo(() => {
     if (sales.length === 0) return 0;
 
-    return totalSales / sales.length;
-  }, [sales.length, totalSales]);
+    return totalValue / sales.length;
+  }, [sales.length, totalValue]);
 
   const topProducts = useMemo(() => {
     const grouped = saleItems.reduce((result, item) => {
@@ -382,7 +373,7 @@ export default function ReportsPage() {
     const label = formatPeriodTitle(reportType, periodRange);
 
     const confirmed = window.confirm(
-      `ต้องการปิดยอด ${label} ใช่หรือไม่?\n\nระบบจะบันทึกยอดสรุปไว้ แต่จะไม่ลบประวัติการขาย`
+      `ต้องการปิดยอด ${label} ใช่หรือไม่?\n\nระบบจะบันทึกยอดสรุปไว้ แต่จะไม่ลบประวัติรายการตัดสต็อก`
     );
 
     if (!confirmed) return;
@@ -405,24 +396,23 @@ export default function ReportsPage() {
 
     await loadReport();
 
-    alert("ปิดยอดรายงานสำเร็จ ข้อมูลการขายเดิมยังดูย้อนหลังได้");
+    alert("ปิดยอดรายงานสำเร็จ ข้อมูลเดิมยังดูย้อนหลังได้");
   }
 
   function exportCsv() {
     if (sales.length === 0) {
-      alert("ไม่มีข้อมูลการขายสำหรับ Export");
+      alert("ไม่มีข้อมูลสำหรับ Export");
       return;
     }
 
     const rows = [
       [
-        "วันที่ขาย",
-        "เลขที่บิล",
-        "พนักงานขาย",
+        "วันที่ตัดสต็อก",
+        "เลขที่รายการ",
+        "ผู้ดำเนินการ",
         "จำนวนสินค้า",
         "จำนวนรายการ",
-        "ส่วนลด",
-        "ยอดสุทธิ",
+        "มูลค่ารวม",
         "หมายเหตุ",
       ],
 
@@ -438,7 +428,6 @@ export default function ReportsPage() {
           sale.seller_name || "-",
           summary.quantity,
           summary.lines,
-          formatMoney(sale.discount_amount),
           formatMoney(sale.total_amount),
           sale.note || "",
         ];
@@ -456,7 +445,7 @@ export default function ReportsPage() {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
+    link.download = `stock-out-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
 
     document.body.appendChild(link);
     link.click();
@@ -468,8 +457,7 @@ export default function ReportsPage() {
   function printReport() {
     window.print();
   }
-
-  return (
+    return (
     <div className="min-h-screen bg-slate-50 flex">
       <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white print:hidden">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
@@ -507,7 +495,7 @@ export default function ReportsPage() {
 
           <Menu
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/sales"
           />
 
@@ -537,7 +525,7 @@ export default function ReportsPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                รายงาน
+                รายงานตัดสต็อก
               </h1>
 
               <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
@@ -546,7 +534,7 @@ export default function ReportsPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              สรุปยอดขายรายวัน รายเดือน รายปี และตรวจสอบข้อมูลย้อนหลัง
+              สรุปรายการเบิก/ตัดสต็อกรายวัน รายเดือน รายปี และตรวจสอบย้อนหลัง
             </p>
           </div>
 
@@ -555,7 +543,7 @@ export default function ReportsPage() {
 
         <div className="hidden print:block">
           <h1 className="text-3xl font-bold text-slate-900">
-            รายงานยอดขาย
+            รายงานตัดสต็อก
           </h1>
 
           <p className="mt-2 text-slate-600">
@@ -572,21 +560,21 @@ export default function ReportsPage() {
             <PeriodButton
               active={reportType === "daily"}
               title="รายวัน"
-              detail="ดูยอดขายของวันที่เลือก"
+              detail="ดูรายการของวันที่เลือก"
               onClick={() => setReportType("daily")}
             />
 
             <PeriodButton
               active={reportType === "monthly"}
               title="รายเดือน"
-              detail="ดูยอดขายรวมทั้งเดือน"
+              detail="ดูรายการรวมทั้งเดือน"
               onClick={() => setReportType("monthly")}
             />
 
             <PeriodButton
               active={reportType === "yearly"}
               title="รายปี"
-              detail="ดูยอดขายรวมทั้งปี"
+              detail="ดูรายการรวมทั้งปี"
               onClick={() => setReportType("yearly")}
             />
           </div>
@@ -668,7 +656,7 @@ export default function ReportsPage() {
           </div>
 
           <p className="mt-5 text-sm text-slate-500">
-            การปิดยอดจะบันทึกยอดสรุปของช่วงเวลาไว้ โดยไม่ลบประวัติการขายเดิม
+            การปิดยอดจะบันทึกยอดสรุปของช่วงเวลาไว้ โดยไม่ลบประวัติเดิม
           </p>
         </section>
 
@@ -683,8 +671,8 @@ export default function ReportsPage() {
                 </p>
 
                 <p className="mt-1 text-sm text-emerald-700">
-                  ยอดปิด {formatMoney(closingInfo.total_amount)} บาท ·{" "}
-                  {toNumber(closingInfo.bill_count)} บิล ·{" "}
+                  มูลค่าปิดยอด {formatMoney(closingInfo.total_amount)} บาท ·{" "}
+                  {toNumber(closingInfo.bill_count)} รายการ ·{" "}
                   {toNumber(closingInfo.item_quantity)} ชิ้น
                 </p>
 
@@ -708,33 +696,33 @@ export default function ReportsPage() {
           </h2>
 
           <p className="mt-1 text-slate-500">
-            สรุปข้อมูลตามช่วงเวลาที่เลือก ข้อมูลการขายสามารถดูย้อนหลังได้
+            สรุปข้อมูลการเบิก/ตัดสต็อกตามช่วงเวลาที่เลือก
           </p>
         </section>
 
         <section className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
-            title="ยอดขายรวม"
-            value={`฿ ${formatMoney(totalSales)}`}
-            detail={`${sales.length.toLocaleString()} บิลขาย`}
+            title="มูลค่ารวม"
+            value={`฿ ${formatMoney(totalValue)}`}
+            detail={`${sales.length.toLocaleString()} รายการ`}
             icon={<FaShoppingCart />}
             color="red"
           />
 
           <SummaryCard
-            title="จำนวนสินค้าที่ขาย"
+            title="จำนวนสินค้าที่ตัด"
             value={`${totalQuantity.toLocaleString()} ชิ้น`}
-            detail={`ส่วนลดรวม ฿ ${formatMoney(totalDiscount)}`}
+            detail="รวมจำนวนสินค้าทุกรายการ"
             icon={<FaBox />}
             color="orange"
           />
 
           <SummaryCard
-            title="สินค้าขายดี"
+            title="สินค้าถูกตัดมากสุด"
             value={topProduct ? topProduct.name : "-"}
             detail={
               topProduct
-                ? `ขายแล้ว ${topProduct.quantity.toLocaleString()} ชิ้น`
+                ? `จำนวน ${topProduct.quantity.toLocaleString()} ชิ้น`
                 : "ยังไม่มีข้อมูล"
             }
             icon={<FaCheckCircle />}
@@ -742,9 +730,9 @@ export default function ReportsPage() {
           />
 
           <SummaryCard
-            title="ยอดเฉลี่ยต่อบิล"
-            value={`฿ ${formatMoney(averagePerBill)}`}
-            detail="คำนวณจากยอดสุทธิ"
+            title="มูลค่าเฉลี่ยต่อรายการ"
+            value={`฿ ${formatMoney(averagePerRecord)}`}
+            detail="คำนวณจากมูลค่ารวม"
             icon={<FaChartBar />}
             color="blue"
           />
@@ -754,11 +742,11 @@ export default function ReportsPage() {
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm 2xl:col-span-2">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                กราฟยอดขาย
+                กราฟมูลค่าการตัดสต็อก
               </h2>
 
               <p className="mt-1 text-slate-500">
-                สรุปยอดขายตามช่วงเวลาที่เลือก
+                สรุปมูลค่ารวมตามช่วงเวลาที่เลือก
               </p>
             </div>
 
@@ -796,22 +784,20 @@ export default function ReportsPage() {
               </div>
             ) : (
               <div className="mt-8 flex h-72 items-center justify-center rounded-2xl bg-slate-50 text-slate-500">
-                ยังไม่มีข้อมูลยอดขายในช่วงนี้
+                ยังไม่มีข้อมูลในช่วงนี้
               </div>
             )}
           </div>
 
           <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-slate-900">
-                  สินค้าขายดี
-                </h2>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900">
+                สินค้าถูกตัดมากสุด
+              </h2>
 
-                <p className="mt-1 text-sm text-slate-500">
-                  5 อันดับแรก
-                </p>
-              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                5 อันดับแรก
+              </p>
             </div>
 
             <div className="mt-5 space-y-4">
@@ -844,7 +830,7 @@ export default function ReportsPage() {
                 ))
               ) : (
                 <div className="py-12 text-center text-slate-500">
-                  ยังไม่มีรายการขาย
+                  ยังไม่มีรายการตัดสต็อก
                 </div>
               )}
             </div>
@@ -855,11 +841,11 @@ export default function ReportsPage() {
           <div className="flex flex-col gap-3 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                รายการขาย
+                รายการตัดสต็อก
               </h2>
 
               <p className="mt-1 text-slate-500">
-                แสดงข้อมูลการขายตามช่วงเวลาที่เลือก
+                แสดงข้อมูลตามช่วงเวลาที่เลือก
               </p>
             </div>
 
@@ -871,7 +857,7 @@ export default function ReportsPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1050px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead>
                 <tr className="bg-slate-50 text-slate-600">
                   <th className="px-5 py-4 text-left font-semibold">#</th>
@@ -879,19 +865,16 @@ export default function ReportsPage() {
                     วันที่ / เวลา
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
-                    เลขที่บิล
+                    เลขที่รายการ
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
-                    พนักงานขาย
+                    ผู้ดำเนินการ
                   </th>
                   <th className="px-5 py-4 text-center font-semibold">
                     จำนวนสินค้า
                   </th>
                   <th className="px-5 py-4 text-right font-semibold">
-                    ส่วนลด
-                  </th>
-                  <th className="px-5 py-4 text-right font-semibold">
-                    ยอดสุทธิ
+                    มูลค่ารวม
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
                     หมายเหตุ
@@ -942,10 +925,6 @@ export default function ReportsPage() {
                           </span>
                         </td>
 
-                        <td className="px-5 py-4 text-right">
-                          ฿ {formatMoney(sale.discount_amount)}
-                        </td>
-
                         <td className="px-5 py-4 text-right font-bold text-red-600">
                           ฿ {formatMoney(sale.total_amount)}
                         </td>
@@ -959,12 +938,12 @@ export default function ReportsPage() {
                 ) : (
                   <tr>
                     <td
-                      colSpan="8"
+                      colSpan="7"
                       className="px-6 py-14 text-center text-slate-500"
                     >
                       {isLoading
                         ? "กำลังโหลดข้อมูล..."
-                        : "ยังไม่มีรายการขายในช่วงเวลาที่เลือก"}
+                        : "ยังไม่มีรายการตัดสต็อกในช่วงเวลาที่เลือก"}
                     </td>
                   </tr>
                 )}

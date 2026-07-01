@@ -11,8 +11,59 @@ function normalizeValue(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
-export default function BarcodeProductSearch({
+function getScanCandidates(value) {
+  const rawValue = String(value ?? "").trim();
+
+  if (!rawValue) {
+    return [];
+  }
+
+  const candidates = [rawValue];
+
+  try {
+    const json = JSON.parse(rawValue);
+
+    if (json && typeof json === "object") {
+      ["barcode", "code", "product_code", "sku", "id"].forEach((key) => {
+        if (json[key] !== undefined && json[key] !== null) {
+          candidates.push(String(json[key]));
+        }
+      });
+    }
+  } catch {}
+
+  try {
+    const url = new URL(rawValue);
+
+    ["barcode", "code", "product_code", "sku", "id"].forEach((key) => {
+      const valueFromUrl = url.searchParams.get(key);
+
+      if (valueFromUrl) {
+        candidates.push(valueFromUrl);
+      }
+    });
+
+    const pathParts = url.pathname.split("/").filter(Boolean);
+
+    if (pathParts.length > 0) {
+      candidates.push(decodeURIComponent(pathParts[pathParts.length - 1]));
+    }
+  } catch {}
+
+  const labelMatch = rawValue.match(
+    /(?:barcode|code|product_code|sku|id)\s*[:=]\s*["']?([^,\s}&"']+)/i
+  );
+
+  if (labelMatch?.[1]) {
+    candidates.push(labelMatch[1]);
+  }
+
+  return [...new Set(candidates.map(normalizeValue).filter(Boolean))];
+}
+
+export default function BarcodeScanBox({
   products = [],
+  onAddProduct,
   onProductFound,
   disabled = false,
 }) {
@@ -21,45 +72,62 @@ export default function BarcodeProductSearch({
   const [barcodeValue, setBarcodeValue] = useState("");
   const [scanStatus, setScanStatus] = useState({
     type: "idle",
-    text: "พร้อมยิงบาร์โค้ดสินค้า",
+    text: "พร้อมยิงบาร์โค้ดหรือ QR Code",
   });
 
+  const addProductHandler = onAddProduct || onProductFound;
+
   useEffect(() => {
-    if (disabled) return;
+    if (disabled) {
+      return;
+    }
 
     const timer = window.setTimeout(() => {
       inputRef.current?.focus();
-    }, 500);
+    }, 400);
 
     return () => window.clearTimeout(timer);
   }, [disabled]);
 
   function focusScanner() {
+    if (disabled) {
+      return;
+    }
+
     window.setTimeout(() => {
       inputRef.current?.focus();
-      inputRef.current?.select();
     }, 50);
   }
 
   function findProduct(value = barcodeValue) {
     const rawValue = String(value ?? "").trim();
-    const scannedValue = normalizeValue(rawValue);
+    const scanCandidates = getScanCandidates(rawValue);
 
-    if (!scannedValue) {
+    if (scanCandidates.length === 0) {
       setScanStatus({
         type: "error",
-        text: "กรุณายิงบาร์โค้ดหรือกรอกรหัสสินค้าก่อน",
+        text: "กรุณายิงบาร์โค้ดหรือ QR Code ก่อน",
       });
 
       focusScanner();
       return;
     }
 
-    const product = products.find(
-      (item) =>
-        normalizeValue(item.barcode) === scannedValue ||
-        normalizeValue(item.code) === scannedValue
-    );
+    const product = products.find((item) => {
+      const productValues = [
+        item.barcode,
+        item.code,
+        item.product_code,
+        item.sku,
+        item.id,
+      ]
+        .map(normalizeValue)
+        .filter(Boolean);
+
+      return productValues.some((productValue) =>
+        scanCandidates.includes(productValue)
+      );
+    });
 
     setBarcodeValue("");
 
@@ -73,26 +141,69 @@ export default function BarcodeProductSearch({
       return;
     }
 
-    onProductFound?.(product);
+    if (Number(product.stock || 0) <= 0) {
+      setScanStatus({
+        type: "error",
+        text: `สินค้า ${product.name} หมดสต็อก`,
+      });
+
+      focusScanner();
+      return;
+    }
+
+    if (!addProductHandler) {
+      setScanStatus({
+        type: "error",
+        text: "ไม่พบฟังก์ชันเพิ่มสินค้าในหน้านี้",
+      });
+
+      focusScanner();
+      return;
+    }
+
+    const result = addProductHandler(product);
+
+    if (result === false) {
+      setScanStatus({
+        type: "error",
+        text: `ไม่สามารถเพิ่มสินค้า: ${product.name}`,
+      });
+
+      focusScanner();
+      return;
+    }
 
     setScanStatus({
       type: "success",
-      text: `พบสินค้า: ${product.name} · คงเหลือ ${product.stock} ${product.unit}`,
+      text: `เพิ่มสินค้าแล้ว: ${product.name} · คงเหลือ ${product.stock} ${product.unit}`,
     });
 
     focusScanner();
   }
 
   function handleKeyDown(event) {
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter" && event.key !== "Tab") {
+      return;
+    }
 
     event.preventDefault();
     findProduct(event.currentTarget.value);
   }
 
+  function handleChange(event) {
+    setBarcodeValue(event.target.value);
+
+    if (scanStatus.type !== "idle") {
+      setScanStatus({
+        type: "idle",
+        text: "พร้อมยิงบาร์โค้ดหรือ QR Code",
+      });
+    }
+  }
+
   const statusClass =
     scanStatus.type === "success"
-      ? "bg-green-100 text-green-700"
+      ? "bg-emerald-100 text-emerald-700"
       : scanStatus.type === "error"
       ? "bg-red-100 text-red-700"
       : "bg-white text-gray-600";
@@ -109,11 +220,14 @@ export default function BarcodeProductSearch({
           <input
             ref={inputRef}
             value={barcodeValue}
-            onChange={(event) => setBarcodeValue(event.target.value)}
+            onChange={handleChange}
             onKeyDown={handleKeyDown}
+            onClick={focusScanner}
             disabled={disabled}
             autoComplete="off"
-            placeholder="คลิกช่องนี้ แล้วใช้เครื่องยิงบาร์โค้ด"
+            autoCorrect="off"
+            spellCheck="false"
+            placeholder="เสียบ USB แล้วคลิกช่องนี้เพื่อยิงบาร์โค้ด"
             className="w-full rounded-xl border bg-white px-5 py-4 text-lg text-gray-800 outline-none focus:border-red-500 disabled:bg-gray-100"
           />
         </div>
@@ -122,7 +236,7 @@ export default function BarcodeProductSearch({
           type="button"
           onClick={() => findProduct()}
           disabled={disabled}
-          className="rounded-xl bg-red-600 px-6 py-4 font-semibold text-white disabled:bg-red-300"
+          className="rounded-xl bg-red-600 px-6 py-4 font-semibold text-white hover:bg-red-700 disabled:bg-red-300"
         >
           ค้นหาสินค้า
         </button>
@@ -131,7 +245,7 @@ export default function BarcodeProductSearch({
           type="button"
           onClick={focusScanner}
           disabled={disabled}
-          className="rounded-xl border border-red-300 bg-white px-6 py-4 font-semibold text-red-600 disabled:opacity-60"
+          className="rounded-xl border border-red-300 bg-white px-6 py-4 font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
         >
           พร้อมยิง
         </button>
@@ -152,7 +266,7 @@ export default function BarcodeProductSearch({
       </div>
 
       <p className="mt-3 text-sm text-gray-500">
-        ใช้ได้กับเครื่องยิงบาร์โค้ด USB หรือ Bluetooth ที่ส่งปุ่ม Enter หลังรหัสสินค้า
+        รองรับเครื่องสแกน USB หรือ Bluetooth ที่ทำงานแบบคีย์บอร์ด และส่ง Enter หรือ Tab หลังยิงรหัส
       </p>
     </section>
   );

@@ -26,7 +26,9 @@ export default function BarcodeScanBox({
   });
 
   useEffect(() => {
-    if (disabled) return;
+    if (disabled) {
+      return;
+    }
 
     const timer = window.setTimeout(() => {
       inputRef.current?.focus();
@@ -36,40 +38,74 @@ export default function BarcodeScanBox({
   }, [disabled]);
 
   function focusScanner() {
+    if (disabled) {
+      return;
+    }
+
+    setScanErrorStatus();
+
     window.setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.select();
-    }, 50);
+    }, 80);
+  }
+
+  function setScanErrorStatus() {
+    setScanStatus({
+      type: "idle",
+      text: "พร้อมยิงบาร์โค้ดสินค้า",
+    });
   }
 
   function handleScan(event) {
-    if (event.key !== "Enter") return;
+    if (event.key !== "Enter" && event.key !== "Tab") {
+      return;
+    }
 
     event.preventDefault();
 
-    const scannedCode = normalizeScanValue(scanValue);
+    const rawCode = String(event.currentTarget.value ?? "").trim();
+    const scannedCode = normalizeScanValue(rawCode);
 
     if (!scannedCode) {
       setScanStatus({
         type: "error",
         text: "กรุณายิงบาร์โค้ดหรือกรอกรหัสก่อน",
       });
+
       focusScanner();
       return;
     }
 
     const matchedProduct = products.find((product) =>
-      [product.barcode, product.code].some(
+      [
+        product.barcode,
+        product.code,
+        product.product_code,
+        product.id,
+      ].some(
         (value) => normalizeScanValue(value) === scannedCode
       )
     );
 
+    setScanValue("");
+
     if (!matchedProduct) {
       setScanStatus({
         type: "error",
-        text: `ไม่พบสินค้า: ${scanValue.trim()}`,
+        text: `ไม่พบสินค้า: ${rawCode}`,
       });
-      setScanValue("");
+
+      focusScanner();
+      return;
+    }
+
+    if (Number(matchedProduct.stock || 0) <= 0) {
+      setScanStatus({
+        type: "error",
+        text: `สินค้า "${matchedProduct.name}" หมดสต็อก`,
+      });
+
       focusScanner();
       return;
     }
@@ -79,20 +115,29 @@ export default function BarcodeScanBox({
     if (added === false) {
       setScanStatus({
         type: "error",
-        text: `สินค้า "${matchedProduct.name}" หมดสต็อก`,
+        text: `ไม่สามารถเพิ่มสินค้า "${matchedProduct.name}" ได้`,
       });
-      setScanValue("");
+
       focusScanner();
       return;
     }
 
     setScanStatus({
       type: "success",
-      text: `เพิ่มสินค้าแล้ว: ${matchedProduct.name}`,
+      text: `เพิ่มสินค้าแล้ว: ${matchedProduct.name} · คงเหลือ ${matchedProduct.stock} ${matchedProduct.unit}`,
     });
 
-    setScanValue("");
-    focusScanner();
+    window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
+  }
+
+  function handleChange(event) {
+    setScanValue(event.target.value);
+
+    if (scanStatus.type !== "idle") {
+      setScanErrorStatus();
+    }
   }
 
   const isError = scanStatus.type === "error";
@@ -113,12 +158,14 @@ export default function BarcodeScanBox({
             <input
               ref={inputRef}
               value={scanValue}
-              onChange={(event) => setScanValue(event.target.value)}
+              onChange={handleChange}
               onKeyDown={handleScan}
               disabled={disabled}
               autoComplete="off"
+              autoCorrect="off"
+              spellCheck="false"
               placeholder="คลิกช่องนี้ แล้วใช้เครื่องยิงบาร์โค้ด"
-              className="w-full rounded-xl border bg-white py-4 pl-12 pr-4 text-lg text-gray-800 outline-none focus:border-red-500 disabled:bg-gray-100"
+              className="w-full rounded-xl border border-red-300 bg-white py-4 pl-12 pr-4 text-lg text-gray-800 outline-none focus:border-red-500 disabled:bg-gray-100"
             />
           </div>
         </div>
@@ -127,7 +174,7 @@ export default function BarcodeScanBox({
           type="button"
           onClick={focusScanner}
           disabled={disabled}
-          className="rounded-xl border border-red-300 bg-white px-5 py-4 font-semibold text-red-600 disabled:opacity-60"
+          className="rounded-xl border border-red-300 bg-white px-7 py-4 font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
         >
           พร้อมยิง
         </button>
@@ -154,7 +201,7 @@ export default function BarcodeScanBox({
       </div>
 
       <p className="mt-3 text-sm text-gray-500">
-        รองรับเครื่องยิงบาร์โค้ด USB หรือ Bluetooth ที่ส่งปุ่ม Enter หลังรหัสสินค้า
+        เสียบเครื่องยิงบาร์โค้ด USB แล้วกดพร้อมยิง จากนั้นยิงรหัสได้ทันที
       </p>
     </div>
   );

@@ -15,7 +15,6 @@ import {
   FaHome,
   FaMinus,
   FaPlus,
-  FaPrint,
   FaSave,
   FaSearch,
   FaShoppingCart,
@@ -32,7 +31,7 @@ function getToday() {
     .slice(0, 10);
 }
 
-function createSaleNumber() {
+function createStockOutNumber() {
   const now = new Date();
 
   const date = [
@@ -49,7 +48,7 @@ function createSaleNumber() {
 
   const random = Math.floor(100 + Math.random() * 900);
 
-  return `INV-${date}-${time}-${random}`;
+  return `OUT-${date}-${time}-${random}`;
 }
 
 function normalizeValue(value) {
@@ -69,15 +68,6 @@ function formatMoney(value) {
   });
 }
 
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
 function getCategoryName(category) {
   if (Array.isArray(category)) {
     return category[0]?.name || "-";
@@ -86,21 +76,48 @@ function getCategoryName(category) {
   return category?.name || "-";
 }
 
+function getStockInfo(stock) {
+  const quantity = toNumber(stock);
+
+  if (quantity <= 0) {
+    return {
+      label: "หมด",
+      className: "bg-red-100 text-red-600",
+    };
+  }
+
+  if (quantity < 10) {
+    return {
+      label: "ใกล้หมด",
+      className: "bg-orange-100 text-orange-600",
+    };
+  }
+
+  return {
+    label: "มีสินค้า",
+    className: "bg-emerald-100 text-emerald-600",
+  };
+}
+
+function getLineTotal(item) {
+  return toNumber(item.quantity) * toNumber(item.price);
+}
+
 export default function UserSalesPage() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
 
   const [productSearch, setProductSearch] = useState("");
-  const [saleDate, setSaleDate] = useState(getToday());
-  const [saleNumber, setSaleNumber] = useState(createSaleNumber());
+  const [stockOutDate, setStockOutDate] = useState(getToday());
+  const [stockOutNumber, setStockOutNumber] = useState(
+    createStockOutNumber()
+  );
   const [note, setNote] = useState("");
-  const [globalDiscount, setGlobalDiscount] = useState("0");
 
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-  const [lastReceipt, setLastReceipt] = useState(null);
 
   async function loadProducts() {
     setIsLoadingProducts(true);
@@ -135,7 +152,6 @@ export default function UserSalesPage() {
         price: toNumber(product.price),
         stock: toNumber(product.stock),
         unit: product.unit || "ชิ้น",
-        status: product.status || "มีสินค้า",
       }));
 
       setProducts(mappedProducts);
@@ -150,6 +166,25 @@ export default function UserSalesPage() {
 
   useEffect(() => {
     void loadProducts();
+
+    const channel = supabase
+      .channel("user-stock-out-products-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "products",
+        },
+        () => {
+          void loadProducts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const productResults = useMemo(() => {
@@ -169,33 +204,29 @@ export default function UserSalesPage() {
       .slice(0, 8);
   }, [products, productSearch]);
 
-  const itemAmount = useMemo(() => {
-    return cart.reduce(
-      (sum, item) => sum + toNumber(item.quantity) * toNumber(item.price),
-      0
-    );
-  }, [cart]);
-
-  const itemDiscount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + toNumber(item.discount), 0);
-  }, [cart]);
-
   const totalQuantity = useMemo(() => {
     return cart.reduce((sum, item) => sum + toNumber(item.quantity), 0);
   }, [cart]);
 
-  const subtotal = Math.max(0, itemAmount - itemDiscount);
-
-  const globalDiscountAmount = Math.min(
-    Math.max(0, toNumber(globalDiscount)),
-    subtotal
-  );
-
-  const grandTotal = Math.max(0, subtotal - globalDiscountAmount);
+  const totalAmount = useMemo(() => {
+    return cart.reduce((sum, item) => sum + getLineTotal(item), 0);
+  }, [cart]);
 
   function addProduct(product) {
     if (!product || toNumber(product.stock) <= 0) {
       alert(`สินค้า "${product?.name || "-"}" หมดสต๊อก`);
+      return false;
+    }
+
+    const existingItem = cart.find((item) => item.productId === product.id);
+
+    if (
+      existingItem &&
+      toNumber(existingItem.quantity) >= toNumber(product.stock)
+    ) {
+      alert(
+        `สินค้า "${product.name}" มีในสต็อกเพียง ${product.stock} ${product.unit}`
+      );
       return false;
     }
 
@@ -228,12 +259,12 @@ export default function UserSalesPage() {
           unit: product.unit,
           quantity: 1,
           price: product.price,
-          discount: 0,
         },
       ];
     });
 
     setProductSearch("");
+
     return true;
   }
 
@@ -323,19 +354,6 @@ export default function UserSalesPage() {
     );
   }
 
-  function updateDiscount(productId, value) {
-    setCart((previous) =>
-      previous.map((item) =>
-        item.productId === productId
-          ? {
-              ...item,
-              discount: Math.max(0, toNumber(value)),
-            }
-          : item
-      )
-    );
-  }
-
   function removeCartItem(productId) {
     setCart((previous) =>
       previous.filter((item) => item.productId !== productId)
@@ -346,29 +364,27 @@ export default function UserSalesPage() {
     if (cart.length === 0) return;
 
     const confirmed = window.confirm(
-      "ต้องการล้างรายการสินค้าทั้งหมดใช่หรือไม่?"
+      "ต้องการล้างรายการตัดสต็อกทั้งหมดใช่หรือไม่?"
     );
 
     if (!confirmed) return;
 
     setCart([]);
-    setGlobalDiscount("0");
     setNote("");
   }
 
-  function cancelSale() {
+  function cancelStockOut() {
     if (
       cart.length > 0 &&
-      !window.confirm("ต้องการยกเลิกรายการขายนี้ใช่หรือไม่?")
+      !window.confirm("ต้องการยกเลิกรายการตัดสต็อกนี้ใช่หรือไม่?")
     ) {
       return;
     }
 
     setCart([]);
     setProductSearch("");
-    setGlobalDiscount("0");
     setNote("");
-    setSaleNumber(createSaleNumber());
+    setStockOutNumber(createStockOutNumber());
   }
 
   async function handleRefresh() {
@@ -381,7 +397,7 @@ export default function UserSalesPage() {
     }
   }
 
-  async function handleSaveSale() {
+  async function handleSaveStockOut() {
     if (cart.length === 0) {
       alert("กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ");
       return;
@@ -396,22 +412,21 @@ export default function UserSalesPage() {
       return;
     }
 
-    setIsSaving(true);
+    const currentStockOutNumber = stockOutNumber;
 
-    const currentSaleNumber = saleNumber;
-    const cartSnapshot = cart.map((item) => ({ ...item }));
+    setIsSaving(true);
 
     try {
       const { error } = await supabase.rpc("create_user_sale", {
-        p_sale_number: currentSaleNumber,
-        p_sale_date: saleDate,
-        p_note: note.trim(),
-        p_discount: globalDiscountAmount,
+        p_sale_number: currentStockOutNumber,
+        p_sale_date: stockOutDate,
+        p_note: note.trim() || "ตัดสต็อกสินค้า",
+        p_discount: 0,
         p_items: cart.map((item) => ({
           product_id: Number(item.productId),
           quantity: toNumber(item.quantity),
           price: toNumber(item.price),
-          discount: toNumber(item.discount),
+          discount: 0,
         })),
       });
 
@@ -419,170 +434,22 @@ export default function UserSalesPage() {
         throw error;
       }
 
-      setLastReceipt({
-        saleNumber: currentSaleNumber,
-        saleDate,
-        items: cartSnapshot,
-        itemAmount,
-        itemDiscount,
-        globalDiscount: globalDiscountAmount,
-        total: grandTotal,
-      });
-
       await loadProducts();
 
       setCart([]);
       setProductSearch("");
-      setGlobalDiscount("0");
       setNote("");
-      setSaleNumber(createSaleNumber());
+      setStockOutNumber(createStockOutNumber());
 
-      alert(`บันทึกการขายสำเร็จ\nเลขที่บิล: ${currentSaleNumber}`);
+      alert(
+        `บันทึกการตัดสต็อกสำเร็จ\nเลขที่รายการ: ${currentStockOutNumber}`
+      );
     } catch (error) {
       console.error(error);
-      alert(error.message || "บันทึกการขายไม่สำเร็จ");
+      alert(error.message || "บันทึกการตัดสต็อกไม่สำเร็จ");
     } finally {
       setIsSaving(false);
     }
-  }
-  function printLastReceipt() {
-    if (!lastReceipt) {
-      alert("กรุณาบันทึกการขายก่อนพิมพ์ใบเสร็จ");
-      return;
-    }
-
-    const receiptWindow = window.open(
-      "",
-      "_blank",
-      "width=450,height=700"
-    );
-
-    if (!receiptWindow) {
-      alert("กรุณาอนุญาต Pop-up เพื่อพิมพ์ใบเสร็จ");
-      return;
-    }
-
-    const rows = lastReceipt.items
-      .map((item) => {
-        const lineTotal = Math.max(
-          0,
-          toNumber(item.quantity) * toNumber(item.price) -
-            toNumber(item.discount)
-        );
-
-        return `
-          <tr>
-            <td>
-              <strong>${escapeHtml(item.name)}</strong><br />
-              <small>${escapeHtml(item.code)}</small>
-            </td>
-            <td style="text-align:right">${item.quantity}</td>
-            <td style="text-align:right">${formatMoney(lineTotal)}</td>
-          </tr>
-        `;
-      })
-      .join("");
-
-    receiptWindow.document.write(`
-      <html>
-        <head>
-          <title>ใบเสร็จ ${escapeHtml(lastReceipt.saleNumber)}</title>
-
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              padding: 24px;
-              color: #111827;
-            }
-
-            h2,
-            p {
-              margin: 0;
-            }
-
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 20px;
-            }
-
-            td,
-            th {
-              padding: 10px 0;
-              border-bottom: 1px solid #e5e7eb;
-            }
-
-            .row {
-              display: flex;
-              justify-content: space-between;
-              margin-top: 10px;
-            }
-
-            .total {
-              margin-top: 18px;
-              font-size: 20px;
-              font-weight: bold;
-              color: #dc2626;
-              display: flex;
-              justify-content: space-between;
-            }
-          </style>
-        </head>
-
-        <body>
-          <h2>ร้านค้าปลีกอุปกรณ์เครื่องดื่ม</h2>
-          <p>ใบเสร็จรับเงิน</p>
-
-          <br />
-
-          <p>เลขที่บิล: ${escapeHtml(lastReceipt.saleNumber)}</p>
-          <p>วันที่: ${escapeHtml(lastReceipt.saleDate)}</p>
-
-          <table>
-            <thead>
-              <tr>
-                <th style="text-align:left">สินค้า</th>
-                <th style="text-align:right">จำนวน</th>
-                <th style="text-align:right">รวม</th>
-              </tr>
-            </thead>
-
-            <tbody>${rows}</tbody>
-          </table>
-
-          <div class="row">
-            <span>รวมราคาสินค้า</span>
-            <span>${formatMoney(lastReceipt.itemAmount)} บาท</span>
-          </div>
-
-          <div class="row">
-            <span>ส่วนลดสินค้า</span>
-            <span>${formatMoney(lastReceipt.itemDiscount)} บาท</span>
-          </div>
-
-          <div class="row">
-            <span>ส่วนลดรวม</span>
-            <span>${formatMoney(lastReceipt.globalDiscount)} บาท</span>
-          </div>
-
-          <div class="total">
-            <span>ยอดสุทธิ</span>
-            <span>${formatMoney(lastReceipt.total)} บาท</span>
-          </div>
-
-          <p style="margin-top:30px;text-align:center">
-            ขอบคุณที่ใช้บริการ
-          </p>
-        </body>
-      </html>
-    `);
-
-    receiptWindow.document.close();
-    receiptWindow.focus();
-
-    window.setTimeout(() => {
-      receiptWindow.print();
-    }, 300);
   }
 
   return (
@@ -609,22 +476,14 @@ export default function UserSalesPage() {
             เมนูพนักงาน
           </p>
 
-          <Menu
-            icon={<FaHome />}
-            text="หน้าหลัก"
-            href="/user/dashboard"
-          />
+          <Menu icon={<FaHome />} text="หน้าหลัก" href="/user/dashboard" />
 
-          <Menu
-            icon={<FaBox />}
-            text="สินค้า"
-            href="/user/products"
-          />
+          <Menu icon={<FaBox />} text="สินค้า" href="/user/products" />
 
           <Menu
             active
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/user/sales"
           />
 
@@ -645,7 +504,7 @@ export default function UserSalesPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                การขายสินค้า
+                เบิก/ตัดสต็อกสินค้า
               </h1>
 
               <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
@@ -654,7 +513,7 @@ export default function UserSalesPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              เพิ่มสินค้าในรายการ คำนวณยอดขาย และบันทึกใบเสร็จ
+              เลือกสินค้าและระบุจำนวนเพื่อตัดออกจากสต็อก
             </p>
           </div>
 
@@ -672,7 +531,7 @@ export default function UserSalesPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">
-                  ข้อมูลการขาย
+                  ข้อมูลการตัดสต็อก
                 </h2>
 
                 <p className="mt-1 text-slate-500">
@@ -694,13 +553,13 @@ export default function UserSalesPage() {
             <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                  วันที่ขาย
+                  วันที่ตัดสต็อก
                 </label>
 
                 <input
                   type="date"
-                  value={saleDate}
-                  onChange={(event) => setSaleDate(event.target.value)}
+                  value={stockOutDate}
+                  onChange={(event) => setStockOutDate(event.target.value)}
                   disabled={isSaving}
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
                 />
@@ -708,11 +567,11 @@ export default function UserSalesPage() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                  เลขที่บิล
+                  เลขที่รายการ
                 </label>
 
                 <input
-                  value={saleNumber}
+                  value={stockOutNumber}
                   readOnly
                   className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500"
                 />
@@ -730,9 +589,7 @@ export default function UserSalesPage() {
 
                   <input
                     value={productSearch}
-                    onChange={(event) =>
-                      setProductSearch(event.target.value)
-                    }
+                    onChange={(event) => setProductSearch(event.target.value)}
                     onKeyDown={handleSearchKeyDown}
                     disabled={isSaving}
                     placeholder="ชื่อสินค้า รหัสสินค้า หรือบาร์โค้ด"
@@ -781,34 +638,49 @@ export default function UserSalesPage() {
                 </div>
               ) : productResults.length > 0 ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                  {productResults.map((product) => (
-                    <button
-                      key={product.id}
-                      type="button"
-                      onClick={() => addProduct(product)}
-                      disabled={product.stock <= 0 || isSaving}
-                      className="rounded-2xl border border-slate-200 p-4 text-left transition hover:border-red-400 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <div className="flex justify-between gap-3">
-                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold text-slate-600">
-                          {product.code}
-                        </span>
+                  {productResults.map((product) => {
+                    const stockInfo = getStockInfo(product.stock);
 
-                        <span className="font-bold text-red-600">
-                          ฿ {formatMoney(product.price)}
-                        </span>
-                      </div>
+                    return (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => addProduct(product)}
+                        disabled={product.stock <= 0 || isSaving}
+                        className="rounded-2xl border border-slate-200 p-4 text-left transition hover:border-red-400 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <div className="flex justify-between gap-3">
+                          <span className="rounded-lg bg-slate-100 px-2.5 py-1 font-mono text-xs font-semibold text-slate-600">
+                            {product.code}
+                          </span>
 
-                      <p className="mt-3 font-semibold text-slate-900">
-                        {product.name}
-                      </p>
+                          <span className="font-bold text-red-600">
+                            ฿ {formatMoney(product.price)}
+                          </span>
+                        </div>
 
-                      <p className="mt-2 text-sm text-slate-500">
-                        {product.category} · คงเหลือ {product.stock}{" "}
-                        {product.unit}
-                      </p>
-                    </button>
-                  ))}
+                        <p className="mt-3 font-semibold text-slate-900">
+                          {product.name}
+                        </p>
+
+                        <p className="mt-2 text-sm text-slate-500">
+                          {product.category}
+                        </p>
+
+                        <div className="mt-4 flex items-center justify-between gap-3">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-semibold ${stockInfo.className}`}
+                          >
+                            {stockInfo.label}
+                          </span>
+
+                          <span className="text-sm font-medium text-slate-600">
+                            คงเหลือ {product.stock} {product.unit}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="rounded-2xl bg-slate-50 p-8 text-center text-slate-500">
@@ -822,7 +694,7 @@ export default function UserSalesPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">
-                  รายการสินค้าที่ขาย
+                  รายการตัดสต็อก
                 </h2>
 
                 <p className="mt-1 text-slate-500">
@@ -842,133 +714,114 @@ export default function UserSalesPage() {
             </div>
 
             <div className="mt-6 overflow-x-auto">
-              <table className="w-full min-w-[720px] text-sm">
+              <table className="w-full min-w-[770px] text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-500">
                     <th className="py-3 text-left font-medium">สินค้า</th>
-                    <th className="py-3 text-center font-medium">ราคา</th>
-                    <th className="py-3 text-center font-medium">จำนวน</th>
-                    <th className="py-3 text-center font-medium">ส่วนลด</th>
-                    <th className="py-3 text-center font-medium">ยอดรวม</th>
+                    <th className="py-3 text-center font-medium">
+                      ราคาต่อหน่วย
+                    </th>
+                    <th className="py-3 text-center font-medium">
+                      จำนวนที่ตัด
+                    </th>
+                    <th className="py-3 text-center font-medium">
+                      มูลค่ารวม
+                    </th>
                     <th className="py-3"></th>
                   </tr>
                 </thead>
 
                 <tbody>
                   {cart.length > 0 ? (
-                    cart.map((item) => {
-                      const lineTotal = Math.max(
-                        0,
-                        toNumber(item.quantity) * toNumber(item.price) -
-                          toNumber(item.discount)
-                      );
+                    cart.map((item) => (
+                      <tr
+                        key={item.productId}
+                        className="border-b border-slate-100"
+                      >
+                        <td className="py-4">
+                          <p className="font-semibold text-slate-900">
+                            {item.name}
+                          </p>
 
-                      return (
-                        <tr
-                          key={item.productId}
-                          className="border-b border-slate-100"
-                        >
-                          <td className="py-4">
-                            <p className="font-semibold text-slate-900">
-                              {item.name}
-                            </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {item.code} · คงเหลือ {item.stock} {item.unit}
+                          </p>
+                        </td>
 
-                            <p className="mt-1 text-xs text-slate-500">
-                              {item.code} · คงเหลือ {item.stock} {item.unit}
-                            </p>
-                          </td>
+                        <td className="text-center">
+                          <input
+                            type="text"
+                            value={`฿ ${formatMoney(item.price)}`}
+                            readOnly
+                            className="w-28 cursor-default rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-right font-semibold text-slate-700 outline-none"
+                          />
+                        </td>
 
-                          <td className="text-center">
-                            ฿ {formatMoney(item.price)}
-                          </td>
+                        <td className="text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => decreaseQuantity(item.productId)}
+                              disabled={isSaving}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              <FaMinus className="text-xs" />
+                            </button>
 
-                          <td className="text-center">
-                            <div className="flex items-center justify-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  decreaseQuantity(item.productId)
-                                }
-                                disabled={isSaving}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
-                              >
-                                <FaMinus className="text-xs" />
-                              </button>
-
-                              <input
-                                type="number"
-                                min="1"
-                                max={item.stock}
-                                value={item.quantity}
-                                onChange={(event) =>
-                                  updateQuantity(
-                                    item.productId,
-                                    event.target.value
-                                  )
-                                }
-                                disabled={isSaving}
-                                className="w-14 rounded-lg border border-slate-200 py-2 text-center outline-none focus:border-red-500"
-                              />
-
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  increaseQuantity(item.productId)
-                                }
-                                disabled={
-                                  isSaving ||
-                                  toNumber(item.quantity) >=
-                                    toNumber(item.stock)
-                                }
-                                className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
-                              >
-                                <FaPlus className="text-xs" />
-                              </button>
-                            </div>
-                          </td>
-
-                          <td className="text-center">
                             <input
                               type="number"
-                              min="0"
-                              step="0.01"
-                              value={item.discount}
+                              min="1"
+                              max={item.stock}
+                              value={item.quantity}
                               onChange={(event) =>
-                                updateDiscount(
+                                updateQuantity(
                                   item.productId,
                                   event.target.value
                                 )
                               }
                               disabled={isSaving}
-                              className="w-20 rounded-lg border border-slate-200 py-2 text-center outline-none focus:border-red-500"
+                              className="w-14 rounded-lg border border-slate-200 py-2 text-center outline-none focus:border-red-500"
                             />
-                          </td>
 
-                          <td className="text-center font-bold text-slate-900">
-                            ฿ {formatMoney(lineTotal)}
-                          </td>
-
-                          <td className="text-center">
                             <button
                               type="button"
-                              onClick={() => removeCartItem(item.productId)}
-                              disabled={isSaving}
-                              className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
-                              title="ลบรายการ"
+                              onClick={() => increaseQuantity(item.productId)}
+                              disabled={
+                                isSaving ||
+                                toNumber(item.quantity) >=
+                                  toNumber(item.stock)
+                              }
+                              className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50"
                             >
-                              <FaTrash />
+                              <FaPlus className="text-xs" />
                             </button>
-                          </td>
-                        </tr>
-                      );
-                    })
+                          </div>
+                        </td>
+
+                        <td className="text-center font-bold text-slate-900">
+                          ฿ {formatMoney(getLineTotal(item))}
+                        </td>
+
+                        <td className="text-center">
+                          <button
+                            type="button"
+                            onClick={() => removeCartItem(item.productId)}
+                            disabled={isSaving}
+                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                            title="ลบรายการ"
+                          >
+                            <FaTrash />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
                   ) : (
                     <tr>
                       <td
-                        colSpan="6"
+                        colSpan="5"
                         className="py-16 text-center text-slate-500"
                       >
-                        ยังไม่มีสินค้าในรายการขาย
+                        ยังไม่มีสินค้าในรายการตัดสต็อก
                       </td>
                     </tr>
                   )}
@@ -976,40 +829,17 @@ export default function UserSalesPage() {
               </table>
             </div>
 
-            <div className="mt-6 space-y-4 rounded-2xl bg-slate-50 p-6">
+            <div className="mt-6 rounded-2xl bg-red-50 p-6">
               <div className="flex justify-between text-slate-700">
-                <span>รวมราคาสินค้า</span>
-                <b>฿ {formatMoney(itemAmount)}</b>
+                <span>จำนวนสินค้าที่ตัด</span>
+
+                <b>{totalQuantity.toLocaleString()} ชิ้น</b>
               </div>
 
-              <div className="flex justify-between text-slate-700">
-                <span>ส่วนลดสินค้า</span>
-                <b>฿ {formatMoney(itemDiscount)}</b>
-              </div>
+              <div className="mt-4 flex justify-between border-t border-red-200 pt-4 text-2xl font-bold text-red-600">
+                <span>มูลค่ารวม</span>
 
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="text-slate-700">ส่วนลดรวม</span>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={globalDiscount}
-                    onChange={(event) =>
-                      setGlobalDiscount(event.target.value)
-                    }
-                    disabled={isSaving}
-                    className="w-36 rounded-xl border border-slate-200 bg-white p-2 text-right outline-none focus:border-red-500"
-                  />
-
-                  <span className="text-slate-700">บาท</span>
-                </div>
-              </div>
-
-              <div className="flex justify-between border-t border-slate-200 pt-4 text-2xl font-bold text-red-600">
-                <span>ยอดรวมสุทธิ</span>
-                <span>฿ {formatMoney(grandTotal)}</span>
+                <span>฿ {formatMoney(totalAmount)}</span>
               </div>
             </div>
 
@@ -1022,7 +852,7 @@ export default function UserSalesPage() {
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 disabled={isSaving}
-                placeholder="เพิ่มหมายเหตุ (ไม่บังคับ)"
+                placeholder="เพิ่มเหตุผลหรือรายละเอียดการตัดสต็อก (ไม่บังคับ)"
                 rows="3"
                 className="w-full resize-none rounded-xl border border-slate-200 p-4 text-slate-800 outline-none focus:border-red-500"
               />
@@ -1031,7 +861,7 @@ export default function UserSalesPage() {
             <div className="mt-6 grid grid-cols-2 gap-4">
               <button
                 type="button"
-                onClick={cancelSale}
+                onClick={cancelStockOut}
                 disabled={isSaving}
                 className="rounded-xl border border-slate-200 px-6 py-4 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               >
@@ -1040,22 +870,12 @@ export default function UserSalesPage() {
 
               <button
                 type="button"
-                onClick={handleSaveSale}
+                onClick={handleSaveStockOut}
                 disabled={isSaving || cart.length === 0}
                 className="flex items-center justify-center gap-3 rounded-xl bg-red-600 px-6 py-4 text-white hover:bg-red-700 disabled:bg-red-300"
               >
                 <FaSave />
-                {isSaving ? "กำลังบันทึก..." : "บันทึกการขาย"}
-              </button>
-
-              <button
-                type="button"
-                onClick={printLastReceipt}
-                disabled={!lastReceipt || isSaving}
-                className="col-span-2 flex items-center justify-center gap-3 rounded-xl border border-slate-200 px-6 py-4 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-              >
-                <FaPrint />
-                พิมพ์ใบเสร็จล่าสุด
+                {isSaving ? "กำลังบันทึก..." : "บันทึกตัดสต็อก"}
               </button>
             </div>
           </section>

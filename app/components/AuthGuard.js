@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
@@ -9,21 +9,27 @@ const CHECK_INTERVAL_MS = 10000;
 export default function AuthGuard({ children }) {
   const pathname = usePathname();
   const router = useRouter();
+
   const [isChecking, setIsChecking] = useState(true);
+
+  const checkingRef = useRef(false);
+  const disabledMessageShownRef = useRef(false);
 
   useEffect(() => {
     let mounted = true;
-    let checking = false;
-    let hasShownDisabledMessage = false;
 
     async function checkAccess(eventUser, showLoading = false) {
-      if (!mounted || checking) return;
+      if (!mounted || checkingRef.current) {
+        return;
+      }
 
-      checking = true;
+      checkingRef.current = true;
 
       if (showLoading) {
         setIsChecking(true);
       }
+
+      let keepLoading = false;
 
       try {
         let user = eventUser;
@@ -38,9 +44,12 @@ export default function AuthGuard({ children }) {
         }
 
         const isLoginPage = pathname === "/login";
+        const isUserPage =
+          pathname === "/user" || pathname.startsWith("/user/");
 
         if (!user) {
           if (!isLoginPage) {
+            keepLoading = true;
             router.replace("/login");
           }
 
@@ -53,7 +62,9 @@ export default function AuthGuard({ children }) {
           .eq("id", user.id)
           .maybeSingle();
 
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
 
         if (profileError || !profile || profile.is_active === false) {
           await supabase.auth.signOut({ scope: "local" });
@@ -61,44 +72,54 @@ export default function AuthGuard({ children }) {
           if (mounted) {
             if (
               profile?.is_active === false &&
-              !hasShownDisabledMessage
+              !disabledMessageShownRef.current
             ) {
-              hasShownDisabledMessage = true;
+              disabledMessageShownRef.current = true;
 
               alert(
                 "บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ"
               );
             }
 
+            keepLoading = true;
             router.replace("/login");
           }
 
           return;
         }
 
-        const role = profile.role === "admin" ? "admin" : "user";
+        const role =
+          String(profile.role || "").toLowerCase() === "admin"
+            ? "admin"
+            : "user";
 
         if (isLoginPage) {
+          keepLoading = true;
+
           router.replace(
             role === "admin" ? "/dashboard" : "/user/dashboard"
           );
+
           return;
         }
 
-        if (role === "user" && !pathname.startsWith("/user")) {
+        if (role === "user" && !isUserPage) {
+          keepLoading = true;
           router.replace("/user/dashboard");
           return;
         }
 
-        if (role === "admin" && pathname.startsWith("/user")) {
+        if (role === "admin" && isUserPage) {
+          keepLoading = true;
           router.replace("/dashboard");
+          return;
         }
       } catch (error) {
         console.error("ตรวจสอบสิทธิ์ไม่สำเร็จ:", error);
       } finally {
-        checking = false;
+        checkingRef.current = false;
 
-        if (mounted) {
+        if (mounted && !keepLoading) {
           setIsChecking(false);
         }
       }
@@ -109,7 +130,9 @@ export default function AuthGuard({ children }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      void checkAccess(session?.user ?? null);
+      window.setTimeout(() => {
+        void checkAccess(session?.user ?? null);
+      }, 0);
     });
 
     const timer = window.setInterval(() => {
@@ -146,7 +169,7 @@ export default function AuthGuard({ children }) {
 
   if (isChecking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f8f9fb] text-gray-600">
+      <div className="flex min-h-screen items-center justify-center bg-[#f8f9fb] text-gray-600">
         กำลังตรวจสอบสิทธิ์ผู้ใช้งาน...
       </div>
     );

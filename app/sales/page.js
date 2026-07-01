@@ -35,7 +35,7 @@ function getToday() {
     .slice(0, 10);
 }
 
-function createSaleNumber() {
+function createStockOutNumber() {
   const now = new Date();
 
   const date = [
@@ -52,7 +52,7 @@ function createSaleNumber() {
 
   const random = Math.floor(100 + Math.random() * 900);
 
-  return `INV-${date}-${time}-${random}`;
+  return `OUT-${date}-${time}-${random}`;
 }
 
 function toNumber(value) {
@@ -81,19 +81,22 @@ function getStockStatus(stock) {
   return "มีสินค้า";
 }
 
-function getLineAmount(item) {
-  return toNumber(item.quantity) * toNumber(item.price);
-}
+function getStockBadge(stock) {
+  const quantity = toNumber(stock);
 
-function getLineDiscount(item) {
-  return Math.min(
-    Math.max(0, toNumber(item.discount)),
-    getLineAmount(item)
-  );
+  if (quantity <= 0) {
+    return "bg-red-100 text-red-600";
+  }
+
+  if (quantity < 10) {
+    return "bg-orange-100 text-orange-600";
+  }
+
+  return "bg-emerald-100 text-emerald-600";
 }
 
 function getLineTotal(item) {
-  return Math.max(0, getLineAmount(item) - getLineDiscount(item));
+  return toNumber(item.quantity) * toNumber(item.price);
 }
 
 export default function SalesPage() {
@@ -101,11 +104,12 @@ export default function SalesPage() {
   const [cart, setCart] = useState([]);
 
   const [productSearch, setProductSearch] = useState("");
-  const [saleDate, setSaleDate] = useState(getToday());
-  const [sellerName, setSellerName] = useState("Admin");
-  const [saleNumber, setSaleNumber] = useState(createSaleNumber());
+  const [stockOutDate, setStockOutDate] = useState(getToday());
+  const [operatorName, setOperatorName] = useState("Admin");
+  const [stockOutNumber, setStockOutNumber] = useState(
+    createStockOutNumber()
+  );
   const [note, setNote] = useState("");
-  const [globalDiscount, setGlobalDiscount] = useState("0");
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -116,56 +120,58 @@ export default function SalesPage() {
     setIsLoading(true);
     setPageError("");
 
-    const { data, error } = await supabase
-      .from("products")
-      .select(`
-        id,
-        product_code,
-        barcode,
-        name,
-        price,
-        stock,
-        unit,
-        status,
-        category:categories(name)
-      `)
-      .order("name", { ascending: true });
+    try {
+      const { data, error } = await supabase
+        .from("products")
+        .select(`
+          id,
+          product_code,
+          barcode,
+          name,
+          price,
+          stock,
+          unit,
+          status,
+          category:categories(name)
+        `)
+        .order("name", { ascending: true });
 
-    if (error) {
+      if (error) {
+        throw error;
+      }
+
+      const mappedProducts = (data || []).map((product) => {
+        const categoryName = Array.isArray(product.category)
+          ? product.category[0]?.name
+          : product.category?.name;
+
+        return {
+          id: Number(product.id),
+          code: product.product_code || "-",
+          barcode: product.barcode || "",
+          name: product.name || "-",
+          category: categoryName || "-",
+          price: toNumber(product.price),
+          stock: toNumber(product.stock),
+          unit: product.unit || "ชิ้น",
+        };
+      });
+
+      setProducts(mappedProducts);
+    } catch (error) {
       console.error(error);
       setProducts([]);
       setPageError(error.message || "ไม่สามารถโหลดข้อมูลสินค้าได้");
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    const mappedProducts = (data || []).map((product) => {
-      const categoryName = Array.isArray(product.category)
-        ? product.category[0]?.name
-        : product.category?.name;
-
-      return {
-        id: Number(product.id),
-        code: product.product_code || "-",
-        barcode: product.barcode || "",
-        name: product.name || "-",
-        category: categoryName || "-",
-        price: toNumber(product.price),
-        stock: toNumber(product.stock),
-        unit: product.unit || "ชิ้น",
-        status: getStockStatus(product.stock),
-      };
-    });
-
-    setProducts(mappedProducts);
-    setIsLoading(false);
   }
 
   useEffect(() => {
     void loadProducts();
 
     const channel = supabase
-      .channel("admin-sales-products-live")
+      .channel("admin-stock-out-products-live")
       .on(
         "postgres_changes",
         {
@@ -173,7 +179,9 @@ export default function SalesPage() {
           schema: "public",
           table: "products",
         },
-        () => void loadProducts()
+        () => {
+          void loadProducts();
+        }
       )
       .subscribe();
 
@@ -213,33 +221,13 @@ export default function SalesPage() {
     return cart.reduce((sum, item) => sum + toNumber(item.quantity), 0);
   }, [cart]);
 
-  const itemAmount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + getLineAmount(item), 0);
+  const totalAmount = useMemo(() => {
+    return cart.reduce((sum, item) => sum + getLineTotal(item), 0);
   }, [cart]);
-
-  const itemDiscount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + getLineDiscount(item), 0);
-  }, [cart]);
-
-  const subtotal = useMemo(() => {
-    return Math.max(0, itemAmount - itemDiscount);
-  }, [itemAmount, itemDiscount]);
-
-  const saleDiscount = useMemo(() => {
-    return Math.min(Math.max(0, toNumber(globalDiscount)), subtotal);
-  }, [globalDiscount, subtotal]);
-
-  const totalDiscount = useMemo(() => {
-    return itemDiscount + saleDiscount;
-  }, [itemDiscount, saleDiscount]);
-
-  const grandTotal = useMemo(() => {
-    return Math.max(0, subtotal - saleDiscount);
-  }, [subtotal, saleDiscount]);
 
   function addProduct(product) {
     if (!product || toNumber(product.stock) <= 0) {
-      alert(`สินค้า "${product?.name || "-"}" หมดสต๊อก`);
+      alert(`สินค้า "${product?.name || "-"}" หมดสต็อก`);
       return false;
     }
 
@@ -252,7 +240,7 @@ export default function SalesPage() {
       toNumber(existingItem.quantity) >= toNumber(product.stock)
     ) {
       alert(
-        `สินค้า "${product.name}" มีในสต๊อกเพียง ${product.stock} ${product.unit}`
+        `สินค้า "${product.name}" มีในสต็อกเพียง ${product.stock} ${product.unit}`
       );
       return false;
     }
@@ -288,7 +276,6 @@ export default function SalesPage() {
           unit: product.unit,
           quantity: 1,
           price: toNumber(product.price),
-          discount: 0,
         },
       ];
     });
@@ -329,7 +316,9 @@ export default function SalesPage() {
   function updateCartItem(productId, field, value) {
     setCart((previous) =>
       previous.map((item) => {
-        if (item.productId !== productId) return item;
+        if (item.productId !== productId) {
+          return item;
+        }
 
         if (field === "quantity") {
           const quantity = Math.max(
@@ -343,35 +332,17 @@ export default function SalesPage() {
           return {
             ...item,
             quantity,
-            discount: Math.min(
-              getLineDiscount(item),
-              quantity * toNumber(item.price)
-            ),
           };
         }
 
-        if (field === "price") {
-          const price = Math.max(0, toNumber(value));
-
-          return {
-            ...item,
-            price,
-            discount: Math.min(
-              getLineDiscount(item),
-              toNumber(item.quantity) * price
-            ),
-          };
-        }
-
-        if (field === "discount") {
-          return {
-            ...item,
-            discount: Math.min(
-              Math.max(0, toNumber(value)),
-              getLineAmount(item)
-            ),
-          };
-        }
+        <td className="px-5 py-4 text-right">
+  <input
+    type="text"
+    value={`฿ ${formatMoney(item.price)}`}
+    readOnly
+    className="w-28 cursor-default rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-right font-semibold text-slate-700 outline-none"
+  />
+</td>
 
         return item;
       })
@@ -388,20 +359,19 @@ export default function SalesPage() {
     if (cart.length === 0) return;
 
     const confirmed = window.confirm(
-      "ต้องการล้างรายการสินค้าในบิลทั้งหมดใช่หรือไม่?"
+      "ต้องการล้างรายการตัดสต็อกทั้งหมดใช่หรือไม่?"
     );
 
     if (!confirmed) return;
 
     setCart([]);
-    setGlobalDiscount("0");
     setNote("");
   }
 
-  function cancelSale() {
+  function cancelStockOut() {
     if (cart.length > 0) {
       const confirmed = window.confirm(
-        "ต้องการยกเลิกรายการขายนี้ใช่หรือไม่?"
+        "ต้องการยกเลิกรายการตัดสต็อกนี้ใช่หรือไม่?"
       );
 
       if (!confirmed) return;
@@ -409,18 +379,21 @@ export default function SalesPage() {
 
     setCart([]);
     setProductSearch("");
-    setGlobalDiscount("0");
     setNote("");
-    setSaleNumber(createSaleNumber());
+    setStockOutNumber(createStockOutNumber());
   }
 
   async function handleRefresh() {
     setIsRefreshing(true);
-    await loadProducts();
-    setIsRefreshing(false);
+
+    try {
+      await loadProducts();
+    } finally {
+      setIsRefreshing(false);
+    }
   }
 
-  async function handleSaveSale() {
+  async function handleSaveStockOut() {
     if (cart.length === 0) {
       alert("กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ");
       return;
@@ -433,45 +406,49 @@ export default function SalesPage() {
     );
 
     if (hasInvalidQuantity) {
-      alert("มีสินค้าที่ระบุจำนวนเกินสต๊อก กรุณาตรวจสอบอีกครั้ง");
+      alert("มีสินค้าที่ระบุจำนวนเกินสต็อก กรุณาตรวจสอบอีกครั้ง");
       return;
     }
 
-    const currentSaleNumber = saleNumber;
+    const currentStockOutNumber = stockOutNumber;
 
     setIsSaving(true);
 
-    const { error } = await supabase.rpc("create_admin_sale", {
-      p_sale_number: currentSaleNumber,
-      p_sale_date: saleDate,
-      p_seller_name: sellerName.trim() || "Admin",
-      p_note: note.trim(),
-      p_discount: saleDiscount,
-      p_items: cart.map((item) => ({
-        product_id: Number(item.productId),
-        quantity: toNumber(item.quantity),
-        price: toNumber(item.price),
-        discount: getLineDiscount(item),
-      })),
-    });
+    try {
+      const { error } = await supabase.rpc("create_admin_sale", {
+        p_sale_number: currentStockOutNumber,
+        p_sale_date: stockOutDate,
+        p_seller_name: operatorName.trim() || "Admin",
+        p_note: note.trim() || "ตัดสต็อกสินค้า",
+        p_discount: 0,
+        p_items: cart.map((item) => ({
+          product_id: Number(item.productId),
+          quantity: toNumber(item.quantity),
+          price: toNumber(item.price),
+          discount: 0,
+        })),
+      });
 
-    setIsSaving(false);
+      if (error) {
+        throw error;
+      }
 
-    if (error) {
+      await loadProducts();
+
+      setCart([]);
+      setProductSearch("");
+      setNote("");
+      setStockOutNumber(createStockOutNumber());
+
+      alert(
+        `บันทึกการตัดสต็อกสำเร็จ\nเลขที่รายการ: ${currentStockOutNumber}`
+      );
+    } catch (error) {
       console.error(error);
-      alert(error.message || "บันทึกการขายไม่สำเร็จ");
-      return;
+      alert(error.message || "บันทึกการตัดสต็อกไม่สำเร็จ");
+    } finally {
+      setIsSaving(false);
     }
-
-    await loadProducts();
-
-    setCart([]);
-    setProductSearch("");
-    setGlobalDiscount("0");
-    setNote("");
-    setSaleNumber(createSaleNumber());
-
-    alert(`บันทึกการขายสำเร็จ\nเลขที่บิล: ${currentSaleNumber}`);
   }
 
   return (
@@ -513,13 +490,13 @@ export default function SalesPage() {
           <Menu
             active
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/sales"
           />
 
           <Menu
             icon={<FaHistory />}
-            text="ประวัติสต๊อก"
+            text="ประวัติสต็อก"
             href="/stock-movements"
           />
 
@@ -538,7 +515,7 @@ export default function SalesPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                ขายสินค้า
+                เบิก/ตัดสต็อกสินค้า
               </h1>
 
               <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
@@ -547,7 +524,7 @@ export default function SalesPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              สร้างรายการขาย ค้นหาสินค้า และสแกนบาร์โค้ด
+              เลือกสินค้า ระบุจำนวน และคำนวณมูลค่ารายการตัดสต็อก
             </p>
           </div>
 
@@ -555,7 +532,7 @@ export default function SalesPage() {
             <button
               type="button"
               onClick={handleRefresh}
-              disabled={isRefreshing}
+              disabled={isRefreshing || isSaving}
               className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
               <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
@@ -586,7 +563,7 @@ export default function SalesPage() {
                 </p>
 
                 <p className="mt-1 text-sm text-red-600">
-                  สินค้าที่หมดจะไม่สามารถเพิ่มลงในบิลได้
+                  สินค้าที่หมดจะไม่สามารถตัดสต็อกได้
                 </p>
               </div>
             </div>
@@ -619,30 +596,34 @@ export default function SalesPage() {
 
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                ข้อมูลการขาย
+                ข้อมูลการตัดสต็อก
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                ตรวจสอบข้อมูลก่อนบันทึกการขาย
+                ระบุข้อมูลผู้ดำเนินการก่อนบันทึกรายการ
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
             <Field
-              label="วันที่ขาย"
-              value={saleDate}
-              onChange={(event) => setSaleDate(event.target.value)}
+              label="วันที่ตัดสต็อก"
+              value={stockOutDate}
+              onChange={(event) => setStockOutDate(event.target.value)}
               type="date"
               icon={<FaCalendarAlt />}
             />
 
-            <Field label="เลขที่บิล" value={saleNumber} disabled />
+            <Field
+              label="เลขที่รายการ"
+              value={stockOutNumber}
+              disabled
+            />
 
             <Field
-              label="พนักงานขาย"
-              value={sellerName}
-              onChange={(event) => setSellerName(event.target.value)}
+              label="ผู้ดำเนินการ"
+              value={operatorName}
+              onChange={(event) => setOperatorName(event.target.value)}
               placeholder="เช่น Admin"
             />
           </div>
@@ -672,6 +653,7 @@ export default function SalesPage() {
               value={productSearch}
               onChange={(event) => setProductSearch(event.target.value)}
               onKeyDown={handleProductSearchKeyDown}
+              disabled={isSaving}
               placeholder="ค้นหาชื่อสินค้า / รหัสสินค้า / สแกนบาร์โค้ด แล้วกด Enter"
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-4 pl-12 pr-4 text-slate-800 outline-none focus:border-red-500 focus:bg-white"
             />
@@ -697,8 +679,6 @@ export default function SalesPage() {
             {!isLoading &&
               productResults.map((product) => {
                 const isOutOfStock = product.stock <= 0;
-                const isLowStock =
-                  product.stock > 0 && product.stock < 10;
 
                 return (
                   <button
@@ -717,8 +697,12 @@ export default function SalesPage() {
                         {product.code}
                       </span>
 
-                      <span className="font-bold text-red-600">
-                        ฿ {formatMoney(product.price)}
+                      <span
+                        className={`rounded-full px-3 py-1 text-xs font-semibold ${getStockBadge(
+                          product.stock
+                        )}`}
+                      >
+                        {getStockStatus(product.stock)}
                       </span>
                     </div>
 
@@ -730,21 +714,13 @@ export default function SalesPage() {
                       {product.category}
                     </p>
 
-                    <div className="mt-4 flex items-center justify-between gap-3">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          isOutOfStock
-                            ? "bg-red-100 text-red-600"
-                            : isLowStock
-                            ? "bg-orange-100 text-orange-600"
-                            : "bg-emerald-100 text-emerald-600"
-                        }`}
-                      >
-                        {getStockStatus(product.stock)}
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-slate-600">
+                        คงเหลือ {product.stock} {product.unit}
                       </span>
 
-                      <span className="text-sm font-medium text-slate-600">
-                        {product.stock} {product.unit}
+                      <span className="font-bold text-red-600">
+                        ฿ {formatMoney(product.price)}
                       </span>
                     </div>
                   </button>
@@ -763,7 +739,7 @@ export default function SalesPage() {
           <div className="flex flex-col gap-4 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                รายการสินค้าในบิล
+                รายการตัดสต็อก
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
@@ -783,7 +759,7 @@ export default function SalesPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[1050px] text-sm">
               <thead>
                 <tr className="bg-slate-50 text-slate-600">
                   <th className="px-5 py-4 text-left font-semibold">#</th>
@@ -797,16 +773,16 @@ export default function SalesPage() {
                     หมวดหมู่
                   </th>
                   <th className="px-5 py-4 text-center font-semibold">
-                    จำนวน
+                    คงเหลือ
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    จำนวนที่ตัด
                   </th>
                   <th className="px-5 py-4 text-right font-semibold">
                     ราคาต่อหน่วย
                   </th>
                   <th className="px-5 py-4 text-right font-semibold">
-                    ส่วนลด
-                  </th>
-                  <th className="px-5 py-4 text-right font-semibold">
-                    รวมเงิน
+                    มูลค่ารวม
                   </th>
                   <th className="px-5 py-4 text-center font-semibold">
                     จัดการ
@@ -835,13 +811,13 @@ export default function SalesPage() {
                         <p className="font-semibold text-slate-900">
                           {item.name}
                         </p>
-
-                        <p className="mt-1 text-xs text-slate-400">
-                          คงเหลือ {item.stock} {item.unit}
-                        </p>
                       </td>
 
                       <td className="px-5 py-4">{item.category}</td>
+
+                      <td className="px-5 py-4 text-center">
+                        {item.stock} {item.unit}
+                      </td>
 
                       <td className="px-5 py-4 text-center">
                         <input
@@ -879,24 +855,6 @@ export default function SalesPage() {
                         />
                       </td>
 
-                      <td className="px-5 py-4 text-right">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={item.discount}
-                          disabled={isSaving}
-                          onChange={(event) =>
-                            updateCartItem(
-                              item.productId,
-                              "discount",
-                              event.target.value
-                            )
-                          }
-                          className="w-28 rounded-xl border border-slate-200 px-3 py-2 text-right outline-none focus:border-red-500"
-                        />
-                      </td>
-
                       <td className="px-5 py-4 text-right font-bold text-slate-900">
                         ฿ {formatMoney(getLineTotal(item))}
                       </td>
@@ -921,7 +879,7 @@ export default function SalesPage() {
                       className="px-6 py-16 text-center text-slate-500"
                     >
                       <FaShoppingCart className="mx-auto mb-3 text-4xl text-slate-300" />
-                      <p>ยังไม่มีสินค้าในบิล</p>
+                      <p>ยังไม่มีสินค้าในรายการตัดสต็อก</p>
                       <p className="mt-1 text-sm">
                         กรุณาค้นหาหรือสแกนบาร์โค้ดเพื่อเพิ่มสินค้า
                       </p>
@@ -943,7 +901,7 @@ export default function SalesPage() {
               value={note}
               onChange={(event) => setNote(event.target.value)}
               disabled={isSaving}
-              placeholder="เพิ่มหมายเหตุเกี่ยวกับรายการขายนี้ (ไม่บังคับ)"
+              placeholder="เพิ่มเหตุผลหรือรายละเอียดการตัดสต็อก (ไม่บังคับ)"
               rows="6"
               className="w-full resize-none rounded-xl border border-slate-200 px-5 py-4 text-slate-800 outline-none focus:border-red-500"
             />
@@ -951,54 +909,34 @@ export default function SalesPage() {
 
           <div className="rounded-3xl border border-red-100 bg-red-50 p-6">
             <h2 className="text-xl font-bold text-slate-900">
-              สรุปยอดขาย
+              สรุปรายการตัดสต็อก
             </h2>
 
             <div className="mt-6 space-y-4 text-slate-700">
               <SummaryRow
-                label={`รวมสินค้า (${totalQuantity} ชิ้น)`}
-                value={`฿ ${formatMoney(itemAmount)}`}
+                label="จำนวนรายการสินค้า"
+                value={`${cart.length} รายการ`}
               />
 
               <SummaryRow
-                label="ส่วนลดสินค้า"
-                value={`฿ ${formatMoney(itemDiscount)}`}
+                label="จำนวนสินค้าที่ตัด"
+                value={`${totalQuantity} ชิ้น`}
               />
 
-              <div className="flex items-center justify-between gap-3">
-                <span>ส่วนลดรวม</span>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={globalDiscount}
-                    disabled={isSaving}
-                    onChange={(event) =>
-                      setGlobalDiscount(event.target.value)
-                    }
-                    className="w-28 rounded-xl border border-red-200 bg-white px-3 py-2 text-right outline-none focus:border-red-500"
-                  />
-
-                  <span>บาท</span>
-                </div>
-              </div>
-
               <SummaryRow
-                label="ส่วนลดทั้งหมด"
-                value={`฿ ${formatMoney(totalDiscount)}`}
+                label="มูลค่ารวม"
+                value={`฿ ${formatMoney(totalAmount)}`}
               />
             </div>
 
             <div className="mt-6 border-t border-red-200 pt-5">
               <div className="flex items-end justify-between gap-3">
                 <span className="text-xl font-bold text-red-600">
-                  ยอดรวมสุทธิ
+                  มูลค่ารวมสุทธิ
                 </span>
 
                 <span className="text-right text-3xl font-bold text-red-600">
-                  ฿ {formatMoney(grandTotal)}
+                  ฿ {formatMoney(totalAmount)}
                 </span>
               </div>
             </div>
@@ -1008,22 +946,22 @@ export default function SalesPage() {
         <div className="mt-8 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button
             type="button"
-            onClick={cancelSale}
+            onClick={cancelStockOut}
             disabled={isSaving}
             className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-8 py-4 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
           >
             <FaTimes />
-            ยกเลิกรายการขาย
+            ยกเลิกรายการ
           </button>
 
           <button
             type="button"
-            onClick={handleSaveSale}
+            onClick={handleSaveStockOut}
             disabled={isSaving || cart.length === 0}
             className="flex items-center justify-center gap-3 rounded-2xl bg-red-600 px-10 py-4 font-medium text-white shadow-lg hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-red-300"
           >
             <FaSave />
-            {isSaving ? "กำลังบันทึก..." : "บันทึกการขาย"}
+            {isSaving ? "กำลังบันทึก..." : "บันทึกตัดสต็อก"}
           </button>
         </div>
       </main>
@@ -1088,7 +1026,7 @@ function SummaryRow({ label, value }) {
   return (
     <div className="flex items-center justify-between gap-3">
       <span>{label}</span>
-      <span className="font-medium">{value}</span>
+      <span className="font-medium text-right">{value}</span>
     </div>
   );
 }
