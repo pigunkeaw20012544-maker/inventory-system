@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import AccountHeader from "../components/AccountHeader";
+import BrandLogo from "../components/BrandLogo";
 import AdminDailySalesSubmissions from "../components/AdminDailySalesSubmissions";
 import LogoutButton from "../components/LogoutButton";
 import { supabase } from "../lib/supabase";
@@ -462,9 +463,7 @@ export default function ReportsPage() {
       <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white print:hidden">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
-              🥤
-            </div>
+            <BrandLogo />
 
             <div>
               <h2 className="text-lg font-bold">

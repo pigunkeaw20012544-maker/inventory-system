@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 import { FaUser, FaLock } from "react-icons/fa";
 import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
+import BrandLogo from "../components/BrandLogo";
 
 export default function LoginPage() {
 const router = useRouter();
@@ -76,17 +77,18 @@ return ( <div className="min-h-screen flex"> <div className="hidden lg:block w-1
     <div className="absolute top-0 right-0 w-[250px] h-full bg-red-600 rounded-l-full opacity-80"></div>
 
     <div className="relative z-10 p-16 text-white">
-      <div className="flex items-center gap-4">
-        <div className="bg-red-600 p-4 rounded-2xl text-3xl">☕</div>
+      <div className="max-w-[520px]">
+  <div>
+    <h2 className="text-lg text-white/90">
+      ระบบบริหารจัดการ
+    </h2>
 
-        <div>
-          <h2 className="text-xl">ระบบบริหารจัดการ</h2>
-
-          <h1 className="text-4xl font-bold">
-            ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
-          </h1>
-        </div>
-      </div>
+    <h1 className="mt-1 text-3xl font-bold leading-tight xl:text-4xl">
+      <span className="block">ร้านค้าปลีกอุปกรณ์</span>
+      <span className="block">เครื่องดื่ม</span>
+    </h1>
+  </div>
+</div>
 
       <div className="w-20 h-1 bg-red-500 mt-16 mb-8"></div>
 

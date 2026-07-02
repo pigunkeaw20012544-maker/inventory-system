@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   FaBell,
+  FaCalendarAlt,
   FaCheckCircle,
   FaEye,
   FaSyncAlt,
@@ -25,6 +26,16 @@ function formatMoney(value) {
   });
 }
 
+function formatDate(value) {
+  if (!value) return "-";
+
+  return new Date(`${value}T00:00:00`).toLocaleDateString("th-TH", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
 function formatDateTime(value) {
   if (!value) return "-";
 
@@ -38,8 +49,7 @@ function formatDateTime(value) {
 }
 
 export default function AdminDailySalesSubmissions() {
-  const today = getToday();
-
+  const [selectedDate, setSelectedDate] = useState(getToday());
   const [submissions, setSubmissions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [markingId, setMarkingId] = useState(null);
@@ -60,7 +70,7 @@ export default function AdminDailySalesSubmissions() {
         submitted_at,
         seen_at
       `)
-      .eq("report_date", today)
+      .eq("report_date", selectedDate)
       .order("submitted_at", { ascending: false });
 
     if (error) {
@@ -77,7 +87,7 @@ export default function AdminDailySalesSubmissions() {
     void loadSubmissions();
 
     const channel = supabase
-      .channel(`admin-stock-out-submissions-${today}`)
+      .channel(`admin-stock-out-submissions-${selectedDate}`)
       .on(
         "postgres_changes",
         {
@@ -85,14 +95,16 @@ export default function AdminDailySalesSubmissions() {
           schema: "public",
           table: "daily_sales_submissions",
         },
-        loadSubmissions
+        () => {
+          void loadSubmissions();
+        }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [selectedDate]);
 
   const unreadCount = useMemo(() => {
     return submissions.filter((item) => !item.seen_at).length;
@@ -119,9 +131,13 @@ export default function AdminDailySalesSubmissions() {
     await loadSubmissions();
   }
 
+  function handleToday() {
+    setSelectedDate(getToday());
+  }
+
   return (
     <section className="mb-6 rounded-3xl border bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-3">
           <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
             <FaBell className="text-xl" />
@@ -135,28 +151,49 @@ export default function AdminDailySalesSubmissions() {
 
           <div>
             <h2 className="text-2xl font-bold text-gray-900">
-              รายการตัดสต็อกจากพนักงานวันนี้
+              รายการตัดสต็อกจากพนักงาน
             </h2>
 
             <p className="mt-1 text-gray-500">
-              รายการที่พนักงานส่งเข้าระบบโดยตรง
+              แสดงรายการที่พนักงานส่งในวันที่ {formatDate(selectedDate)}
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={loadSubmissions}
-          disabled={isLoading}
-          className="flex items-center gap-2 rounded-xl border px-5 py-3 text-gray-700 disabled:opacity-60"
-        >
-          <FaSyncAlt className={isLoading ? "animate-spin" : ""} />
-          รีเฟรชรายการ
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative">
+            <FaCalendarAlt className="pointer-events-none absolute left-4 top-4 text-slate-400" />
+
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(event) => setSelectedDate(event.target.value)}
+              className="rounded-xl border border-slate-200 py-3 pl-11 pr-4 text-slate-800 outline-none focus:border-red-500"
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={handleToday}
+            className="rounded-xl border border-red-200 bg-red-50 px-5 py-3 text-red-600 hover:bg-red-100"
+          >
+            วันนี้
+          </button>
+
+          <button
+            type="button"
+            onClick={loadSubmissions}
+            disabled={isLoading}
+            className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-3 text-gray-700 hover:bg-slate-50 disabled:opacity-60"
+          >
+            <FaSyncAlt className={isLoading ? "animate-spin" : ""} />
+            รีเฟรชรายการ
+          </button>
+        </div>
       </div>
 
       <div className="mt-6 overflow-x-auto">
-        <table className="w-full min-w-[800px]">
+        <table className="w-full min-w-[900px]">
           <thead className="bg-gray-100 text-gray-700">
             <tr>
               <th className="p-4 text-left">รหัสพนักงาน</th>
@@ -174,14 +211,20 @@ export default function AdminDailySalesSubmissions() {
               submissions.map((item) => (
                 <tr key={item.id} className="border-b text-gray-800">
                   <td className="p-4 font-semibold">
-                    {item.employee_code}
+                    {item.employee_code || "-"}
                   </td>
 
-                  <td className="p-4">{item.employee_name}</td>
+                  <td className="p-4">
+                    {item.employee_name || "ไม่ระบุชื่อ"}
+                  </td>
 
-                  <td className="p-4">{item.bill_count} รายการ</td>
+                  <td className="p-4">
+                    {Number(item.bill_count || 0).toLocaleString()} รายการ
+                  </td>
 
-                  <td className="p-4">{item.item_quantity} ชิ้น</td>
+                  <td className="p-4">
+                    {Number(item.item_quantity || 0).toLocaleString()} ชิ้น
+                  </td>
 
                   <td className="p-4 font-bold text-red-600">
                     {formatMoney(item.total_amount)} บาท
@@ -221,7 +264,9 @@ export default function AdminDailySalesSubmissions() {
                 >
                   {isLoading
                     ? "กำลังโหลดข้อมูล..."
-                    : "วันนี้ยังไม่มีพนักงานส่งรายการตัดสต็อก"}
+                    : `ไม่มีพนักงานส่งรายการตัดสต็อกในวันที่ ${formatDate(
+                        selectedDate
+                      )}`}
                 </td>
               </tr>
             )}

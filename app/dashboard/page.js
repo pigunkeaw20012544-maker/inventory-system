@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import AccountHeader from "../components/AccountHeader";
+import BrandLogo from "../components/BrandLogo";
 import LogoutButton from "../components/LogoutButton";
 import { supabase } from "../lib/supabase";
 
@@ -100,6 +101,8 @@ export default function DashboardPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [sales, setSales] = useState([]);
+  const [saleItems, setSaleItems] = useState([]);
+  const [productCosts, setProductCosts] = useState([]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -113,10 +116,11 @@ export default function DashboardPage() {
       { data: productData, error: productError },
       { data: categoryData, error: categoryError },
       { data: salesData, error: salesError },
+      { data: costData, error: costError },
     ] = await Promise.all([
       supabase
         .from("products")
-        .select("id, product_code, name, stock, unit, status")
+        .select("id, product_code, name, price, stock, unit, status")
         .order("stock", { ascending: true }),
 
       supabase
@@ -135,30 +139,143 @@ export default function DashboardPage() {
           created_at
         `)
         .order("created_at", { ascending: false })
-        .limit(100),
+        .limit(300),
+
+      supabase
+        .from("product_costs")
+        .select("product_id, cost_price"),
     ]);
 
-    if (productError || categoryError || salesError) {
-      console.error(productError || categoryError || salesError);
+    if (productError || categoryError || salesError || costError) {
+      console.error(productError || categoryError || salesError || costError);
 
       setErrorMessage(
-        "ไม่สามารถโหลดข้อมูล Dashboard ได้ กรุณาตรวจสอบฐานข้อมูล Supabase"
+        productError?.message ||
+          categoryError?.message ||
+          salesError?.message ||
+          costError?.message ||
+          "ไม่สามารถโหลดข้อมูล Dashboard ได้ กรุณาตรวจสอบฐานข้อมูล Supabase"
       );
+    }
+
+    const salesList = salesData || [];
+    const saleIds = salesList.map((sale) => sale.id);
+
+    let saleItemData = [];
+
+    if (saleIds.length > 0) {
+      const { data, error } = await supabase
+        .from("sale_items")
+        .select(`
+          sale_id,
+          product_id,
+          quantity,
+          price,
+          subtotal
+        `)
+        .in("sale_id", saleIds);
+
+      if (error) {
+        console.error(error);
+        setErrorMessage(error.message || "ไม่สามารถโหลดข้อมูลรายการสินค้าได้");
+        saleItemData = [];
+      } else {
+        saleItemData = data || [];
+      }
     }
 
     setProducts(productData || []);
     setCategories(categoryData || []);
-    setSales(salesData || []);
+    setSales(salesList);
+    setSaleItems(saleItemData);
+    setProductCosts(costData || []);
 
     setIsLoading(false);
   }
 
   useEffect(() => {
     void loadDashboard();
+
+    const channel = supabase
+      .channel("admin-dashboard-live")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "products",
+        },
+        () => {
+          void loadDashboard();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "product_costs",
+        },
+        () => {
+          void loadDashboard();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "categories",
+        },
+        () => {
+          void loadDashboard();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "sales",
+        },
+        () => {
+          void loadDashboard();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "sale_items",
+        },
+        () => {
+          void loadDashboard();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const today = getLocalDateString();
   const yesterday = getDaysAgoString(1);
+
+  const costByProductId = useMemo(() => {
+    return productCosts.reduce((result, item) => {
+      result[String(item.product_id)] = toNumber(item.cost_price);
+      return result;
+    }, {});
+  }, [productCosts]);
+
+  const saleById = useMemo(() => {
+    return sales.reduce((result, sale) => {
+      result[String(sale.id)] = sale;
+      return result;
+    }, {});
+  }, [sales]);
 
   const outOfStockProducts = useMemo(() => {
     return products
@@ -196,19 +313,65 @@ export default function DashboardPage() {
     return sales.filter((sale) => sale.sale_date === today).length;
   }, [sales, today]);
 
+  const todayCost = useMemo(() => {
+    return saleItems.reduce((sum, item) => {
+      const sale = saleById[String(item.sale_id)];
+
+      if (!sale || sale.sale_date !== today) {
+        return sum;
+      }
+
+      const costPrice = costByProductId[String(item.product_id)] || 0;
+
+      return sum + costPrice * toNumber(item.quantity);
+    }, 0);
+  }, [saleItems, saleById, today, costByProductId]);
+
+  const todayProfit = useMemo(() => {
+    return todaySales - todayCost;
+  }, [todaySales, todayCost]);
+
+  const todayProfitPercent = useMemo(() => {
+    if (todaySales <= 0) {
+      return 0;
+    }
+
+    return (todayProfit / todaySales) * 100;
+  }, [todaySales, todayProfit]);
+
+  const inventorySaleValue = useMemo(() => {
+    return products.reduce(
+      (total, product) =>
+        total + toNumber(product.price) * toNumber(product.stock),
+      0
+    );
+  }, [products]);
+
+  const inventoryCostValue = useMemo(() => {
+    return products.reduce((total, product) => {
+      const costPrice = costByProductId[String(product.id)] || 0;
+
+      return total + costPrice * toNumber(product.stock);
+    }, 0);
+  }, [products, costByProductId]);
+
+  const inventoryProfitValue = useMemo(() => {
+    return inventorySaleValue - inventoryCostValue;
+  }, [inventorySaleValue, inventoryCostValue]);
+
   const comparisonText = useMemo(() => {
     if (yesterdaySales === 0 && todaySales === 0) {
-      return "ยังไม่มีข้อมูลยอดขาย";
+      return "ยังไม่มีข้อมูลรายการวันนี้";
     }
 
     if (yesterdaySales === 0) {
-      return "เริ่มมียอดขายวันนี้";
+      return "เริ่มมีรายการตัดสต็อกวันนี้";
     }
 
     const difference = todaySales - yesterdaySales;
 
     if (difference === 0) {
-      return "ยอดขายเท่ากับเมื่อวาน";
+      return "มูลค่ารวมเท่ากับเมื่อวาน";
     }
 
     return `${difference > 0 ? "เพิ่มขึ้น" : "ลดลง"} ${formatMoney(
@@ -242,6 +405,15 @@ export default function DashboardPage() {
 
   const recentSales = sales.slice(0, 5);
 
+  function getSaleCost(saleId) {
+    return saleItems
+      .filter((item) => String(item.sale_id) === String(saleId))
+      .reduce((sum, item) => {
+        const costPrice = costByProductId[String(item.product_id)] || 0;
+        return sum + costPrice * toNumber(item.quantity);
+      }, 0);
+  }
+
   async function handleRefresh() {
     setIsRefreshing(true);
     await loadDashboard();
@@ -253,9 +425,7 @@ export default function DashboardPage() {
       <aside className="w-[290px] shrink-0 min-h-screen bg-[#182232] text-white print:hidden">
         <div className="bg-red-600 px-7 py-8 rounded-br-[42px] shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
-              🥤
-            </div>
+            <BrandLogo />
 
             <div>
               <h2 className="text-lg font-bold">
@@ -286,13 +456,13 @@ export default function DashboardPage() {
 
           <Menu
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/sales"
           />
 
           <Menu
             icon={<FaHistory />}
-            text="ประวัติสต๊อก"
+            text="ประวัติสต็อก"
             href="/stock-movements"
           />
 
@@ -323,7 +493,7 @@ export default function DashboardPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              ภาพรวมยอดขาย สินค้า และการแจ้งเตือนสต๊อก
+              ภาพรวมสินค้า ต้นทุน กำไร และการแจ้งเตือนสต็อก
             </p>
           </div>
 
@@ -372,7 +542,7 @@ export default function DashboardPage() {
                   </h2>
 
                   <p className="mt-1 text-sm text-red-600">
-                    สินค้าเหลือ 0 ชิ้น กรุณารับสินค้าเข้าเพื่อให้สามารถขายได้
+                    สินค้าเหลือ 0 ชิ้น กรุณารับสินค้าเข้าเพื่อให้สามารถตัดสต็อกได้
                   </p>
 
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -450,7 +620,7 @@ export default function DashboardPage() {
           </Link>
         )}
 
-        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-5">
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
           <Card
             title="สินค้าทั้งหมด"
             value={products.length.toLocaleString()}
@@ -472,16 +642,6 @@ export default function DashboardPage() {
           />
 
           <Card
-            title="สินค้าหมด"
-            value={outOfStockProducts.length.toLocaleString()}
-            unit="รายการ"
-            color="red"
-            icon={<FaExclamationTriangle />}
-            href="/products"
-            footer="ต้องรับสินค้าเข้า"
-          />
-
-          <Card
             title="สินค้าใกล้หมด"
             value={lowStockProducts.length.toLocaleString()}
             unit="รายการ"
@@ -492,13 +652,53 @@ export default function DashboardPage() {
           />
 
           <Card
-            title="ยอดขายวันนี้"
+            title="มูลค่าตัดสต็อกวันนี้"
             value={`฿ ${formatMoney(todaySales)}`}
             unit=""
             color="green"
             icon={<FaShoppingCart />}
             href="/sales"
-            footer={`${todayBillCount} บิลขายวันนี้`}
+            footer={`${todayBillCount} รายการวันนี้`}
+          />
+
+          <Card
+            title="ต้นทุนวันนี้"
+            value={`฿ ${formatMoney(todayCost)}`}
+            unit=""
+            color="purple"
+            icon={<FaBriefcase />}
+            href="/reports"
+            footer="ต้นทุนสินค้าที่ถูกตัดวันนี้"
+          />
+
+          <Card
+            title="กำไรขั้นต้นวันนี้"
+            value={`฿ ${formatMoney(todayProfit)}`}
+            unit=""
+            color={todayProfit >= 0 ? "green" : "red"}
+            icon={<FaChartBar />}
+            href="/reports"
+            footer={`กำไร ${todayProfitPercent.toFixed(1)}%`}
+          />
+
+          <Card
+            title="ต้นทุนสินค้าคงเหลือ"
+            value={`฿ ${formatMoney(inventoryCostValue)}`}
+            unit=""
+            color="purple"
+            icon={<FaBox />}
+            href="/products"
+            footer="ต้นทุนรวมของสต็อก"
+          />
+
+          <Card
+            title="กำไรคงเหลือในสต็อก"
+            value={`฿ ${formatMoney(inventoryProfitValue)}`}
+            unit=""
+            color={inventoryProfitValue >= 0 ? "blue" : "red"}
+            icon={<FaChartBar />}
+            href="/products"
+            footer="ราคาขายรวม - ต้นทุนรวม"
           />
         </section>
 
@@ -507,7 +707,7 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">
-                  ยอดขาย 7 วันล่าสุด
+                  มูลค่าตัดสต็อก 7 วันล่าสุด
                 </h2>
 
                 <p className="mt-4 text-3xl font-bold text-red-600">
@@ -517,13 +717,32 @@ export default function DashboardPage() {
                 <p className="mt-2 text-slate-500">
                   {comparisonText}
                 </p>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <MiniSummary
+                    label="ต้นทุนวันนี้"
+                    value={`฿ ${formatMoney(todayCost)}`}
+                  />
+
+                  <MiniSummary
+                    label="กำไรวันนี้"
+                    value={`฿ ${formatMoney(todayProfit)}`}
+                    highlight={todayProfit >= 0 ? "green" : "red"}
+                  />
+
+                  <MiniSummary
+                    label="กำไรขั้นต้น"
+                    value={`${todayProfitPercent.toFixed(1)}%`}
+                    highlight={todayProfit >= 0 ? "green" : "red"}
+                  />
+                </div>
               </div>
 
               <Link
                 href="/reports"
                 className="rounded-xl border border-red-200 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
               >
-                ดูรายงานยอดขาย
+                ดูรายงานตัดสต็อก
               </Link>
             </div>
 
@@ -614,9 +833,11 @@ export default function DashboardPage() {
             ) : (
               <div className="flex h-56 flex-col items-center justify-center text-center text-slate-500">
                 <FaBoxOpen className="mb-3 text-4xl text-emerald-500" />
+
                 <p className="font-medium text-slate-700">
                   สต๊อกสินค้าปกติ
                 </p>
+
                 <p className="mt-1 text-sm">
                   ไม่มีสินค้าที่หมดหรือใกล้หมด
                 </p>
@@ -629,11 +850,11 @@ export default function DashboardPage() {
           <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                รายการขายล่าสุด
+                รายการตัดสต็อกล่าสุด
               </h2>
 
               <p className="mt-1 text-slate-500">
-                ข้อมูลจากรายการขายที่บันทึกในระบบ
+                แสดงมูลค่ารวม ต้นทุน และกำไรขั้นต้นของแต่ละรายการ
               </p>
             </div>
 
@@ -646,56 +867,77 @@ export default function DashboardPage() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[850px]">
+            <table className="w-full min-w-[1050px]">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="p-4 text-left">#</th>
                   <th className="p-4 text-left">วันที่ / เวลา</th>
-                  <th className="p-4 text-left">เลขที่บิล</th>
-                  <th className="p-4 text-left">พนักงานขาย</th>
-                  <th className="p-4 text-left">ยอดรวมสุทธิ</th>
+                  <th className="p-4 text-left">เลขที่รายการ</th>
+                  <th className="p-4 text-left">ผู้ดำเนินการ</th>
+                  <th className="p-4 text-right">มูลค่ารวม</th>
+                  <th className="p-4 text-right">ต้นทุน</th>
+                  <th className="p-4 text-right">กำไรขั้นต้น</th>
                 </tr>
               </thead>
 
               <tbody>
                 {recentSales.length > 0 ? (
-                  recentSales.map((sale, index) => (
-                    <tr
-                      key={sale.id}
-                      className="border-b border-slate-100 text-slate-800"
-                    >
-                      <td className="p-4">{index + 1}</td>
+                  recentSales.map((sale, index) => {
+                    const saleCost = getSaleCost(sale.id);
+                    const saleProfit = toNumber(sale.total_amount) - saleCost;
 
-                      <td className="p-4">
-                        <div>{formatThaiDate(sale.sale_date)}</div>
+                    return (
+                      <tr
+                        key={sale.id}
+                        className="border-b border-slate-100 text-slate-800"
+                      >
+                        <td className="p-4">{index + 1}</td>
 
-                        <div className="mt-1 text-xs text-slate-400">
-                          {formatDateTime(sale.created_at)}
-                        </div>
-                      </td>
+                        <td className="p-4">
+                          <div>{formatThaiDate(sale.sale_date)}</div>
 
-                      <td className="p-4 font-semibold">
-                        {sale.sale_number}
-                      </td>
+                          <div className="mt-1 text-xs text-slate-400">
+                            {formatDateTime(sale.created_at)}
+                          </div>
+                        </td>
 
-                      <td className="p-4">
-                        {sale.seller_name || "Admin"}
-                      </td>
+                        <td className="p-4 font-semibold">
+                          {sale.sale_number}
+                        </td>
 
-                      <td className="p-4 font-bold text-red-600">
-                        ฿ {formatMoney(sale.total_amount)}
-                      </td>
-                    </tr>
-                  ))
+                        <td className="p-4">
+                          {sale.seller_name || "Admin"}
+                        </td>
+
+                        <td className="p-4 text-right font-bold text-red-600">
+                          ฿ {formatMoney(sale.total_amount)}
+                        </td>
+
+                        <td className="p-4 text-right font-bold text-violet-600">
+                          ฿ {formatMoney(saleCost)}
+                        </td>
+
+                        <td
+                          className={`p-4 text-right font-bold ${
+                            saleProfit >= 0
+                              ? "text-emerald-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          ฿ {formatMoney(saleProfit)}
+                        </td>
+                      </tr>
+                    );
+                  })
                 ) : (
                   <tr>
                     <td
-                      colSpan="5"
+                      colSpan="7"
                       className="p-10 text-center text-slate-500"
                     >
                       {isLoading
                         ? "กำลังโหลดข้อมูล..."
-                        : "ยังไม่มีรายการขายในระบบ"}
+                        : "ยังไม่มีรายการตัดสต็อกในระบบ"}
                     </td>
                   </tr>
                 )}
@@ -720,7 +962,7 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="text-slate-500">
-                  จัดการสินค้า เพิ่ม แก้ไข ลบ และตรวจสอบสต๊อก
+                  จัดการสินค้า ราคาต้นทุน ราคาขาย และกำไรต่อหน่วย
                 </p>
               </div>
             </div>
@@ -743,7 +985,7 @@ export default function DashboardPage() {
                 </h2>
 
                 <p className="text-slate-500">
-                  ดูรายงานยอดขายและสรุปข้อมูล
+                  ดูรายงานตัดสต็อกและสรุปข้อมูล
                 </p>
               </div>
             </div>
@@ -769,6 +1011,22 @@ function Menu({ icon, text, href, active }) {
       <span className="text-lg">{icon}</span>
       <span className="font-medium">{text}</span>
     </Link>
+  );
+}
+
+function MiniSummary({ label, value, highlight }) {
+  const color =
+    highlight === "green"
+      ? "text-emerald-600"
+      : highlight === "red"
+      ? "text-red-600"
+      : "text-slate-900";
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-sm text-slate-500">{label}</p>
+      <p className={`mt-1 text-xl font-bold ${color}`}>{value}</p>
+    </div>
   );
 }
 
@@ -798,6 +1056,11 @@ function Card({ title, value, unit, color, icon, href, footer }) {
       icon: "bg-emerald-100 text-emerald-600",
       number: "text-emerald-600",
       footer: "bg-emerald-50 text-emerald-600",
+    },
+    purple: {
+      icon: "bg-violet-100 text-violet-600",
+      number: "text-violet-600",
+      footer: "bg-violet-50 text-violet-600",
     },
   };
 

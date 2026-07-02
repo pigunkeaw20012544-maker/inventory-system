@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import AccountHeader from "../../components/AccountHeader";
+import BrandLogo from "../../components/BrandLogo";
 import LogoutButton from "../../components/LogoutButton";
 import { supabase } from "../../lib/supabase";
 
@@ -119,16 +120,13 @@ export default function UserProductsPage() {
 
   const [products, setProducts] = useState([]);
   const [keyword, setKeyword] = useState("");
-
   const [barcodeValue, setBarcodeValue] = useState("");
   const [scanMessage, setScanMessage] = useState(
     "พร้อมยิงบาร์โค้ดสินค้า"
   );
   const [scanError, setScanError] = useState(false);
-
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
-
   const [isLoading, setIsLoading] = useState(true);
   const [pageError, setPageError] = useState("");
 
@@ -346,9 +344,7 @@ export default function UserProductsPage() {
       <aside className="min-h-screen w-[290px] shrink-0 bg-[#182232] text-white">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
-              🥤
-            </div>
+            <BrandLogo />
 
             <div>
               <h2 className="text-lg font-bold">ระบบบริหารจัดการ</h2>

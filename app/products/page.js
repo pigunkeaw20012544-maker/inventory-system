@@ -28,6 +28,7 @@ import {
 } from "react-icons/fa";
 
 import AccountHeader from "../components/AccountHeader";
+import BrandLogo from "../components/BrandLogo";
 import BarcodeProductSearch from "../components/BarcodeProductSearch";
 import LogoutButton from "../components/LogoutButton";
 import { supabase } from "../lib/supabase";
@@ -37,6 +38,7 @@ const emptyForm = {
   barcode: "",
   name: "",
   category_id: "",
+  cost_price: "",
   price: "",
   stock: "",
   unit: "ชิ้น",
@@ -66,6 +68,32 @@ function formatMoney(value) {
   });
 }
 
+function getGrossProfit(price, costPrice) {
+  return Number(price || 0) - Number(costPrice || 0);
+}
+
+function getGrossMarginPercent(price, costPrice) {
+  const salePrice = Number(price || 0);
+
+  if (salePrice <= 0) {
+    return null;
+  }
+
+  return (getGrossProfit(price, costPrice) / salePrice) * 100;
+}
+
+function getProfitClass(profit) {
+  if (profit < 0) {
+    return "text-red-600";
+  }
+
+  if (profit === 0) {
+    return "text-slate-500";
+  }
+
+  return "text-emerald-600";
+}
+
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -91,39 +119,58 @@ export default function ProductsPage() {
     setIsLoading(true);
     setPageError("");
 
-    const { data, error } = await supabase
-      .from("products")
-      .select(`
-        id,
-        product_code,
-        barcode,
-        name,
-        category_id,
-        price,
-        stock,
-        unit,
-        status,
-        category:categories(name)
-      `)
-      .order("id", { ascending: true });
+    const [
+      { data: productData, error: productError },
+      { data: costData, error: costError },
+    ] = await Promise.all([
+      supabase
+        .from("products")
+        .select(`
+          id,
+          product_code,
+          barcode,
+          name,
+          category_id,
+          price,
+          stock,
+          unit,
+          status,
+          category:categories(name)
+        `)
+        .order("id", { ascending: true }),
 
-    if (error) {
-      console.error(error);
+      supabase
+        .from("product_costs")
+        .select("product_id, cost_price"),
+    ]);
+
+    if (productError || costError) {
+      console.error(productError || costError);
       setProducts([]);
       setPageError(
-        error.message || "ไม่สามารถโหลดข้อมูลสินค้าจากฐานข้อมูลได้"
+        productError?.message ||
+          costError?.message ||
+          "ไม่สามารถโหลดข้อมูลสินค้าได้"
       );
       setIsLoading(false);
       return;
     }
 
-    const mappedProducts = (data || []).map((product) => ({
+    const costByProductId = new Map(
+      (costData || []).map((item) => [
+        String(item.product_id),
+        Number(item.cost_price || 0),
+      ])
+    );
+
+    const mappedProducts = (productData || []).map((product) => ({
       id: product.id,
       code: product.product_code || "-",
       barcode: product.barcode || "",
       name: product.name || "-",
       categoryId: product.category_id,
       category: getCategoryName(product.category),
+      costPrice: costByProductId.get(String(product.id)) || 0,
       price: Number(product.price || 0),
       stock: Number(product.stock || 0),
       unit: product.unit || "ชิ้น",
@@ -160,6 +207,15 @@ export default function ProductsPage() {
           event: "*",
           schema: "public",
           table: "products",
+        },
+        () => void loadProducts()
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "product_costs",
         },
         () => void loadProducts()
       )
@@ -223,13 +279,26 @@ export default function ProductsPage() {
     return products.filter((product) => Number(product.stock) < 10).length;
   }, [products]);
 
-  const inventoryValue = useMemo(() => {
+  const inventorySaleValue = useMemo(() => {
     return products.reduce(
       (total, product) =>
         total + Number(product.price || 0) * Number(product.stock || 0),
       0
     );
   }, [products]);
+
+  const inventoryCostValue = useMemo(() => {
+    return products.reduce(
+      (total, product) =>
+        total +
+        Number(product.costPrice || 0) * Number(product.stock || 0),
+      0
+    );
+  }, [products]);
+
+  const expectedGrossProfit = useMemo(() => {
+    return inventorySaleValue - inventoryCostValue;
+  }, [inventorySaleValue, inventoryCostValue]);
 
   function handleBarcodeProductFound(product) {
     const currentProduct =
@@ -252,7 +321,9 @@ export default function ProductsPage() {
     setShowBarcodeModal(true);
   }
 
-  function openAddModal() {
+  async function openAddModal() {
+    await loadCategories();
+
     setModalMode("add");
     setEditingProduct(null);
     setFormData(emptyForm);
@@ -260,7 +331,9 @@ export default function ProductsPage() {
     setShowProductModal(true);
   }
 
-  function openEditModal(product) {
+  async function openEditModal(product) {
+    await loadCategories();
+
     setModalMode("edit");
     setEditingProduct(product);
     setFormError("");
@@ -270,6 +343,7 @@ export default function ProductsPage() {
       barcode: product.barcode || "",
       name: product.name,
       category_id: String(product.categoryId || ""),
+      cost_price: String(product.costPrice || 0),
       price: String(product.price || ""),
       stock: String(product.stock),
       unit: product.unit || "ชิ้น",
@@ -303,6 +377,7 @@ export default function ProductsPage() {
     const barcode = formData.barcode.trim();
     const name = formData.name.trim();
     const categoryId = Number(formData.category_id);
+    const costPrice = Number(formData.cost_price);
     const price = Number(formData.price);
     const stock = Number(formData.stock);
 
@@ -311,27 +386,30 @@ export default function ProductsPage() {
       !barcode ||
       !name ||
       !formData.category_id ||
+      formData.cost_price === "" ||
       formData.price === "" ||
       formData.stock === ""
     ) {
-      setFormError("กรุณากรอกข้อมูลสินค้าให้ครบทุกช่อง");
+      setFormError("กรุณากรอกข้อมูลสินค้า ราคาต้นทุน และราคาขายให้ครบ");
       return;
     }
 
     if (
       !Number.isFinite(categoryId) ||
+      !Number.isFinite(costPrice) ||
       !Number.isFinite(price) ||
       !Number.isInteger(stock) ||
+      costPrice < 0 ||
       price < 0 ||
       stock < 0
     ) {
       setFormError(
-        "ราคาขายต้องเป็นตัวเลข และจำนวนสต๊อกต้องเป็นจำนวนเต็ม 0 หรือมากกว่า"
+        "ต้นทุนและราคาขายต้องเป็นตัวเลข และจำนวนสต็อกต้องเป็นจำนวนเต็ม 0 หรือมากกว่า"
       );
       return;
     }
 
-    const payload = {
+    const productPayload = {
       product_code: productCode,
       barcode,
       name,
@@ -345,39 +423,81 @@ export default function ProductsPage() {
     setIsSaving(true);
     setFormError("");
 
-    let error;
+    try {
+      let savedProductId = editingProduct?.id;
 
-    if (modalMode === "add") {
-      ({ error } = await supabase.from("products").insert(payload));
-    } else {
-      ({ error } = await supabase
-        .from("products")
-        .update(payload)
-        .eq("id", editingProduct.id));
-    }
+      if (modalMode === "add") {
+        const { data, error } = await supabase
+          .from("products")
+          .insert(productPayload)
+          .select("id")
+          .single();
 
-    setIsSaving(false);
+        if (error) {
+          throw error;
+        }
 
-    if (error) {
+        savedProductId = data.id;
+      } else {
+        const { error } = await supabase
+          .from("products")
+          .update(productPayload)
+          .eq("id", editingProduct.id);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      const { error: costError } = await supabase
+        .from("product_costs")
+        .upsert(
+          {
+            product_id: savedProductId,
+            cost_price: costPrice,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: "product_id",
+          }
+        );
+
+      if (costError) {
+        if (modalMode === "add" && savedProductId) {
+          await supabase
+            .from("products")
+            .delete()
+            .eq("id", savedProductId);
+        }
+
+        throw costError;
+      }
+
+      await loadProducts();
+
+      setShowProductModal(false);
+      setEditingProduct(null);
+      setFormData(emptyForm);
+      setFormError("");
+
+      alert(
+        modalMode === "add"
+          ? "เพิ่มสินค้าพร้อมราคาต้นทุนสำเร็จ"
+          : "แก้ไขสินค้าพร้อมราคาต้นทุนสำเร็จ"
+      );
+    } catch (error) {
       console.error(error);
 
       if (error.code === "23505") {
         setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
       } else {
-        setFormError(error.message || "บันทึกสินค้าไม่สำเร็จ");
+        setFormError(
+          error.message || "บันทึกสินค้าและราคาต้นทุนไม่สำเร็จ"
+        );
       }
-
-      return;
+    } finally {
+      setIsSaving(false);
     }
-
-    await loadProducts();
-    closeProductModal();
-
-    alert(
-      modalMode === "add"
-        ? "เพิ่มสินค้าสำเร็จ"
-        : "แก้ไขสินค้าสำเร็จ"
-    );
   }
 
   async function handleDeleteProduct(product) {
@@ -417,9 +537,7 @@ export default function ProductsPage() {
       <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
-              🥤
-            </div>
+            <BrandLogo />
 
             <div>
               <h2 className="text-lg font-bold">
@@ -450,7 +568,7 @@ export default function ProductsPage() {
 
           <Menu
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/sales"
           />
 
@@ -484,7 +602,7 @@ export default function ProductsPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              เพิ่ม แก้ไข ค้นหา และตรวจสอบสินค้าในคลัง
+              เพิ่ม แก้ไข ตรวจสอบสินค้า ราคาต้นทุน และกำไรขั้นต้น
             </p>
           </div>
 
@@ -629,7 +747,7 @@ export default function ProductsPage() {
           </section>
         )}
 
-        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-5">
           <StatCard
             title="สินค้าทั้งหมด"
             value={products.length.toLocaleString()}
@@ -655,10 +773,18 @@ export default function ProductsPage() {
           />
 
           <StatCard
-            title="มูลค่าสต๊อก"
-            value={`฿ ${formatMoney(inventoryValue)}`}
-            detail={`มี ${categories.length} หมวดหมู่`}
+            title="ต้นทุนสินค้าคงเหลือ"
+            value={`฿ ${formatMoney(inventoryCostValue)}`}
+            detail="คำนวณจากต้นทุน × สต๊อก"
             icon={<FaBox />}
+            color="purple"
+          />
+
+          <StatCard
+            title="กำไรขั้นต้นคงเหลือ"
+            value={`฿ ${formatMoney(expectedGrossProfit)}`}
+            detail="ราคาขาย - ต้นทุน ยังไม่รวมค่าใช้จ่ายอื่น"
+            icon={<FaChartBar />}
             color="blue"
           />
         </section>
@@ -667,7 +793,7 @@ export default function ProductsPage() {
           <div className="flex flex-col gap-3 border-b border-slate-100 p-6 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-2xl font-bold text-slate-900">
-                รายการสินค้า
+                รายการสินค้าและกำไรขั้นต้น
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
@@ -676,7 +802,7 @@ export default function ProductsPage() {
             </div>
 
             <p className="text-sm text-slate-500">
-              ใช้ปุ่มดินสอเพื่อแก้ไขสินค้า
+              ราคาต้นทุนและกำไรเห็นเฉพาะผู้ดูแลระบบ
             </p>
           </div>
 
@@ -688,29 +814,38 @@ export default function ProductsPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1100px] text-sm">
+            <table className="w-full min-w-[1450px] text-sm">
               <thead>
                 <tr className="bg-slate-50 text-slate-600">
-                  <th className="px-6 py-4 text-left font-semibold">#</th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-5 py-4 text-left font-semibold">#</th>
+                  <th className="px-5 py-4 text-left font-semibold">
                     รหัสสินค้า
                   </th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-5 py-4 text-left font-semibold">
                     ชื่อสินค้า
                   </th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-5 py-4 text-left font-semibold">
                     หมวดหมู่
                   </th>
-                  <th className="px-6 py-4 text-right font-semibold">
+                  <th className="px-5 py-4 text-right font-semibold">
+                    ราคาต้นทุน
+                  </th>
+                  <th className="px-5 py-4 text-right font-semibold">
                     ราคาขาย
                   </th>
-                  <th className="px-6 py-4 text-center font-semibold">
+                  <th className="px-5 py-4 text-right font-semibold">
+                    กำไร/หน่วย
+                  </th>
+                  <th className="px-5 py-4 text-right font-semibold">
+                    กำไรขั้นต้น %
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
                     สต๊อก
                   </th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-5 py-4 text-left font-semibold">
                     สถานะ
                   </th>
-                  <th className="px-6 py-4 text-center font-semibold">
+                  <th className="px-5 py-4 text-center font-semibold">
                     จัดการ
                   </th>
                 </tr>
@@ -720,7 +855,7 @@ export default function ProductsPage() {
                 {isLoading && (
                   <tr>
                     <td
-                      colSpan="8"
+                      colSpan="11"
                       className="px-6 py-14 text-center text-slate-500"
                     >
                       กำลังโหลดข้อมูลสินค้า...
@@ -729,92 +864,124 @@ export default function ProductsPage() {
                 )}
 
                 {!isLoading &&
-                  filteredProducts.map((item, index) => (
-                    <tr
-                      key={item.id}
-                      className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
-                    >
-                      <td className="px-6 py-4 text-slate-400">
-                        {index + 1}
-                      </td>
+                  filteredProducts.map((item, index) => {
+                    const profit = getGrossProfit(
+                      item.price,
+                      item.costPrice
+                    );
 
-                      <td className="px-6 py-4">
-                        <span className="rounded-lg bg-slate-100 px-3 py-2 font-mono text-xs font-semibold text-slate-700">
-                          {item.code}
-                        </span>
-                      </td>
+                    const margin = getGrossMarginPercent(
+                      item.price,
+                      item.costPrice
+                    );
 
-                      <td className="px-6 py-4">
-                        <p className="font-semibold text-slate-900">
-                          {item.name}
-                        </p>
+                    return (
+                      <tr
+                        key={item.id}
+                        className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
+                      >
+                        <td className="px-5 py-4 text-slate-400">
+                          {index + 1}
+                        </td>
 
-                        <p className="mt-1 font-mono text-xs text-slate-400">
-                          {item.barcode || "ไม่มีบาร์โค้ด"}
-                        </p>
-                      </td>
+                        <td className="px-5 py-4">
+                          <span className="rounded-lg bg-slate-100 px-3 py-2 font-mono text-xs font-semibold text-slate-700">
+                            {item.code}
+                          </span>
+                        </td>
 
-                      <td className="px-6 py-4">{item.category}</td>
+                        <td className="px-5 py-4">
+                          <p className="font-semibold text-slate-900">
+                            {item.name}
+                          </p>
 
-                      <td className="px-6 py-4 text-right font-medium">
-                        ฿ {formatMoney(item.price)}
-                      </td>
+                          <p className="mt-1 font-mono text-xs text-slate-400">
+                            {item.barcode || "ไม่มีบาร์โค้ด"}
+                          </p>
+                        </td>
 
-                      <td className="px-6 py-4 text-center">
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
-                            Number(item.stock) <= 0
-                              ? "bg-red-100 text-red-600"
-                              : Number(item.stock) < 10
-                              ? "bg-orange-100 text-orange-600"
-                              : "bg-emerald-100 text-emerald-600"
-                          }`}
+                        <td className="px-5 py-4">{item.category}</td>
+
+                        <td className="px-5 py-4 text-right font-medium text-slate-700">
+                          ฿ {formatMoney(item.costPrice)}
+                        </td>
+
+                        <td className="px-5 py-4 text-right font-medium">
+                          ฿ {formatMoney(item.price)}
+                        </td>
+
+                        <td
+                          className={`px-5 py-4 text-right font-bold ${getProfitClass(
+                            profit
+                          )}`}
                         >
-                          {item.stock} {item.unit}
-                        </span>
-                      </td>
+                          ฿ {formatMoney(profit)}
+                        </td>
 
-                      <td className="px-6 py-4">
-                        <StatusBadge status={item.status} />
-                      </td>
+                        <td
+                          className={`px-5 py-4 text-right font-bold ${getProfitClass(
+                            profit
+                          )}`}
+                        >
+                          {margin === null ? "-" : `${margin.toFixed(1)}%`}
+                        </td>
 
-                      <td className="px-6 py-4">
-                        <div className="flex justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openBarcodeModal(item)}
-                            className="rounded-xl border border-slate-200 p-3 text-slate-600 hover:bg-slate-100"
-                            title="ดูบาร์โค้ด"
+                        <td className="px-5 py-4 text-center">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-sm font-semibold ${
+                              Number(item.stock) <= 0
+                                ? "bg-red-100 text-red-600"
+                                : Number(item.stock) < 10
+                                ? "bg-orange-100 text-orange-600"
+                                : "bg-emerald-100 text-emerald-600"
+                            }`}
                           >
-                            <FaBarcode />
-                          </button>
+                            {item.stock} {item.unit}
+                          </span>
+                        </td>
 
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(item)}
-                            className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-600 hover:bg-blue-100"
-                            title="แก้ไขสินค้า"
-                          >
-                            <FaEdit />
-                          </button>
+                        <td className="px-5 py-4">
+                          <StatusBadge status={item.status} />
+                        </td>
 
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteProduct(item)}
-                            className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-600 hover:bg-red-100"
-                            title="ลบสินค้า"
-                          >
-                            <FaTrash />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-5 py-4">
+                          <div className="flex justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => openBarcodeModal(item)}
+                              className="rounded-xl border border-slate-200 p-3 text-slate-600 hover:bg-slate-100"
+                              title="ดูบาร์โค้ด"
+                            >
+                              <FaBarcode />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-600 hover:bg-blue-100"
+                              title="แก้ไขสินค้า ต้นทุน และราคาขาย"
+                            >
+                              <FaEdit />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProduct(item)}
+                              className="rounded-xl border border-red-200 bg-red-50 p-3 text-red-600 hover:bg-red-100"
+                              title="ลบสินค้า"
+                            >
+                              <FaTrash />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
 
                 {!isLoading && filteredProducts.length === 0 && (
                   <tr>
                     <td
-                      colSpan="8"
+                      colSpan="11"
                       className="px-6 py-14 text-center text-slate-500"
                     >
                       ไม่พบสินค้าจากคำค้นหานี้
@@ -846,7 +1013,7 @@ export default function ProductsPage() {
             </h2>
 
             <p className="mt-1 text-slate-500">
-              กรอกข้อมูลให้ครบ แล้วกดบันทึกสินค้า
+              กรอกข้อมูลสินค้า ต้นทุน และราคาขายให้ครบ
             </p>
 
             {formError && (
@@ -902,6 +1069,17 @@ export default function ProductsPage() {
               </div>
 
               <InputField
+                label="ราคาต้นทุน (บาท)"
+                name="cost_price"
+                type="number"
+                min="0"
+                step="0.01"
+                value={formData.cost_price}
+                onChange={handleFormChange}
+                placeholder="0.00"
+              />
+
+              <InputField
                 label="ราคาขาย (บาท)"
                 name="price"
                 type="number"
@@ -945,6 +1123,36 @@ export default function ProductsPage() {
                     ระบบคำนวณจากจำนวนสต๊อกอัตโนมัติ
                   </span>
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                <p className="text-sm text-emerald-700">
+                  กำไรขั้นต้นต่อหน่วย
+                </p>
+
+                <p
+                  className={`mt-1 text-xl font-bold ${getProfitClass(
+                    getGrossProfit(formData.price, formData.cost_price)
+                  )}`}
+                >
+                  ฿{" "}
+                  {formatMoney(
+                    getGrossProfit(formData.price, formData.cost_price)
+                  )}
+                </p>
+
+                <p className="mt-1 text-xs text-slate-500">
+                  กำไรขั้นต้น{" "}
+                  {getGrossMarginPercent(
+                    formData.price,
+                    formData.cost_price
+                  ) === null
+                    ? "-"
+                    : `${getGrossMarginPercent(
+                        formData.price,
+                        formData.cost_price
+                      ).toFixed(1)}%`}
+                </p>
               </div>
             </div>
 
@@ -1144,6 +1352,10 @@ function StatCard({ title, value, detail, icon, color }) {
     blue: {
       icon: "bg-blue-100 text-blue-600",
       line: "bg-blue-500",
+    },
+    purple: {
+      icon: "bg-violet-100 text-violet-600",
+      line: "bg-violet-500",
     },
   };
 

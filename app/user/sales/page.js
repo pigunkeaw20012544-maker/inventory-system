@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import AccountHeader from "../../components/AccountHeader";
 import BarcodeScanBox from "../../components/BarcodeScanBox";
+import BrandLogo from "../../components/BrandLogo";
 import LogoutButton from "../../components/LogoutButton";
 import { supabase } from "../../lib/supabase";
 
@@ -188,21 +189,19 @@ export default function UserSalesPage() {
   }, []);
 
   const productResults = useMemo(() => {
-    const search = normalizeValue(productSearch);
+  const search = normalizeValue(productSearch);
 
-    return products
-      .filter((product) => {
-        if (!search) return true;
+  return products.filter((product) => {
+    if (!search) return true;
 
-        return [
-          product.code,
-          product.barcode,
-          product.name,
-          product.category,
-        ].some((value) => normalizeValue(value).includes(search));
-      })
-      .slice(0, 8);
-  }, [products, productSearch]);
+    return [
+      product.code,
+      product.barcode,
+      product.name,
+      product.category,
+    ].some((value) => normalizeValue(value).includes(search));
+  });
+}, [products, productSearch]);
 
   const totalQuantity = useMemo(() => {
     return cart.reduce((sum, item) => sum + toNumber(item.quantity), 0);
@@ -457,9 +456,7 @@ export default function UserSalesPage() {
       <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/20 text-2xl">
-              🥤
-            </div>
+            <BrandLogo />
 
             <div>
               <h2 className="text-lg font-bold">ระบบบริหารจัดการ</h2>
