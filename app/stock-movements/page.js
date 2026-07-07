@@ -37,11 +37,32 @@ function getToday() {
   return formatLocalDate(new Date());
 }
 
-function getDateRange(dateString) {
-  const [year, month, day] = dateString.split("-").map(Number);
+function getDateRange(startDateString, endDateString) {
+  const [startYear, startMonth, startDay] = startDateString
+    .split("-")
+    .map(Number);
 
-  const startDate = new Date(year, month - 1, day, 0, 0, 0);
-  const endDate = new Date(year, month - 1, day + 1, 0, 0, 0);
+  const [endYear, endMonth, endDay] = endDateString
+    .split("-")
+    .map(Number);
+
+  const startDate = new Date(
+    startYear,
+    startMonth - 1,
+    startDay,
+    0,
+    0,
+    0
+  );
+
+  const endDate = new Date(
+    endYear,
+    endMonth - 1,
+    endDay + 1,
+    0,
+    0,
+    0
+  );
 
   return {
     startAt: startDate.toISOString(),
@@ -71,6 +92,14 @@ function formatDateTime(value) {
   });
 }
 
+function formatDateRange(startDate, endDate) {
+  if (startDate === endDate) {
+    return formatDate(startDate);
+  }
+
+  return `${formatDate(startDate)} - ${formatDate(endDate)}`;
+}
+
 function toNumber(value) {
   const number = Number(value);
 
@@ -81,26 +110,39 @@ function normalizeValue(value) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function getEmployeeKey(movement) {
+  return String(
+    movement.performed_by_user_id ||
+      movement.performed_by_code ||
+      movement.performed_by_name ||
+      "system"
+  );
+}
+
 function getMovementInfo(type) {
   const types = {
     initial_stock: {
-      label: "สต๊อกเริ่มต้น",
+      label: "สต็อกเริ่มต้น",
       color: "bg-blue-100 text-blue-700",
     },
     stock_in: {
-      label: "รับสินค้าเข้า",
+      label: "เพิ่มสต็อก",
       color: "bg-emerald-100 text-emerald-700",
     },
     sale_out: {
-      label: "ขายออก",
+      label: "เบิก/ตัดสต็อก",
+      color: "bg-red-100 text-red-700",
+    },
+    stock_out: {
+      label: "เบิก/ตัดสต็อก",
       color: "bg-red-100 text-red-700",
     },
     adjustment_in: {
-      label: "ปรับเพิ่มสต๊อก",
+      label: "ปรับเพิ่มสต็อก",
       color: "bg-green-100 text-green-700",
     },
     adjustment_out: {
-      label: "ปรับลดสต๊อก",
+      label: "ปรับลดสต็อก",
       color: "bg-orange-100 text-orange-700",
     },
   };
@@ -117,15 +159,23 @@ function isStockIn(type) {
   return ["initial_stock", "stock_in", "adjustment_in"].includes(type);
 }
 
+function isStockOut(type) {
+  return ["sale_out", "stock_out", "adjustment_out"].includes(type);
+}
+
 function getMovementQuantity(movement) {
   return Math.abs(toNumber(movement.quantity));
 }
 
 export default function StockMovementsPage() {
   const [movements, setMovements] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(getToday());
+
+  const [startDate, setStartDate] = useState(getToday());
+  const [endDate, setEndDate] = useState(getToday());
+
   const [keyword, setKeyword] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
+  const [employeeFilter, setEmployeeFilter] = useState("all");
 
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -135,7 +185,21 @@ export default function StockMovementsPage() {
     setIsLoading(true);
     setErrorMessage("");
 
-    const { startAt, endAt } = getDateRange(selectedDate);
+    if (!startDate || !endDate) {
+      setMovements([]);
+      setErrorMessage("กรุณาเลือกวันที่เริ่มต้นและวันที่สิ้นสุด");
+      setIsLoading(false);
+      return;
+    }
+
+    if (startDate > endDate) {
+      setMovements([]);
+      setErrorMessage("วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด");
+      setIsLoading(false);
+      return;
+    }
+
+    const { startAt, endAt } = getDateRange(startDate, endDate);
 
     const { data, error } = await supabase
       .from("stock_movements")
@@ -150,6 +214,7 @@ export default function StockMovementsPage() {
         stock_before,
         stock_after,
         note,
+        performed_by_user_id,
         performed_by_name,
         performed_by_code,
         created_at
@@ -160,9 +225,10 @@ export default function StockMovementsPage() {
 
     if (error) {
       console.error(error);
+
       setMovements([]);
       setErrorMessage(
-        error.message || "ไม่สามารถโหลดประวัติการเคลื่อนไหวสต๊อกได้"
+        error.message || "ไม่สามารถโหลดประวัติการเคลื่อนไหวสต็อกได้"
       );
       setIsLoading(false);
       return;
@@ -191,7 +257,31 @@ export default function StockMovementsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedDate]);
+  }, [startDate, endDate]);
+
+  const employeeOptions = useMemo(() => {
+    const employeeMap = new Map();
+
+    movements.forEach((movement) => {
+      const key = getEmployeeKey(movement);
+
+      if (key === "system") {
+        return;
+      }
+
+      if (!employeeMap.has(key)) {
+        employeeMap.set(key, {
+          key,
+          code: movement.performed_by_code || "-",
+          name: movement.performed_by_name || "ไม่ระบุชื่อ",
+        });
+      }
+    });
+
+    return Array.from(employeeMap.values()).sort((a, b) =>
+      `${a.code} ${a.name}`.localeCompare(`${b.code} ${b.name}`, "th")
+    );
+  }, [movements]);
 
   const filteredMovements = useMemo(() => {
     const search = normalizeValue(keyword);
@@ -201,6 +291,10 @@ export default function StockMovementsPage() {
         typeFilter === "all" ||
         movement.movement_type === typeFilter;
 
+      const matchesEmployee =
+        employeeFilter === "all" ||
+        getEmployeeKey(movement) === employeeFilter;
+
       const matchesSearch =
         !search ||
         [
@@ -209,14 +303,15 @@ export default function StockMovementsPage() {
           movement.performed_by_name,
           movement.performed_by_code,
           movement.note,
+          getMovementInfo(movement.movement_type).label,
         ].some((value) => normalizeValue(value).includes(search));
 
-      return matchesType && matchesSearch;
+      return matchesType && matchesEmployee && matchesSearch;
     });
-  }, [movements, keyword, typeFilter]);
+  }, [movements, keyword, typeFilter, employeeFilter]);
 
   const summary = useMemo(() => {
-    return movements.reduce(
+    return filteredMovements.reduce(
       (result, movement) => {
         const quantity = getMovementQuantity(movement);
 
@@ -225,7 +320,9 @@ export default function StockMovementsPage() {
         if (isStockIn(movement.movement_type)) {
           result.stockIn += quantity;
           result.stockInCount += 1;
-        } else {
+        }
+
+        if (isStockOut(movement.movement_type)) {
           result.stockOut += quantity;
           result.stockOutCount += 1;
         }
@@ -240,7 +337,7 @@ export default function StockMovementsPage() {
         stockOutCount: 0,
       }
     );
-  }, [movements]);
+  }, [filteredMovements]);
 
   async function handleRefresh() {
     setIsRefreshing(true);
@@ -250,6 +347,16 @@ export default function StockMovementsPage() {
     } finally {
       setIsRefreshing(false);
     }
+  }
+
+  function handleClearFilters() {
+    const today = getToday();
+
+    setStartDate(today);
+    setEndDate(today);
+    setKeyword("");
+    setTypeFilter("all");
+    setEmployeeFilter("all");
   }
 
   return (
@@ -286,7 +393,7 @@ export default function StockMovementsPage() {
 
           <Menu
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="เบิก/ตัดสต็อก"
             href="/sales"
           />
 
@@ -321,7 +428,7 @@ export default function StockMovementsPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              ตรวจสอบการรับสินค้าเข้า ขายออก ปรับสต๊อก และผู้ดำเนินการ
+              ตรวจสอบการเพิ่มสต็อก เบิก/ตัดสต็อก และข้อมูลพนักงานผู้ดำเนินการ
             </p>
           </div>
 
@@ -332,49 +439,63 @@ export default function StockMovementsPage() {
           <SummaryCard
             icon={<FaHistory />}
             title="รายการทั้งหมด"
-            value={summary.total}
-            detail="รายการในวันที่เลือก"
+            value={summary.total.toLocaleString()}
+            detail="ตามตัวกรองที่เลือก"
             color="blue"
           />
 
           <SummaryCard
             icon={<FaArrowUp />}
-            title="รับสินค้าเข้า"
-            value={`+${summary.stockIn}`}
-            detail={`${summary.stockInCount} รายการ`}
+            title="เพิ่มสต็อก"
+            value={`+${summary.stockIn.toLocaleString()}`}
+            detail={`${summary.stockInCount.toLocaleString()} รายการ`}
             color="green"
           />
 
           <SummaryCard
             icon={<FaArrowDown />}
-            title="ขายหรือปรับลด"
-            value={`-${summary.stockOut}`}
-            detail={`${summary.stockOutCount} รายการ`}
+            title="เบิก/ตัดสต็อก"
+            value={`-${summary.stockOut.toLocaleString()}`}
+            detail={`${summary.stockOutCount.toLocaleString()} รายการ`}
             color="red"
           />
 
           <SummaryCard
             icon={<FaBoxOpen />}
-            title="วันที่กำลังแสดง"
-            value={formatDate(selectedDate)}
-            detail="สามารถเลือกดูย้อนหลังได้"
+            title="ช่วงวันที่กำลังแสดง"
+            value={formatDateRange(startDate, endDate)}
+            detail="เลือกดูย้อนหลังได้"
             color="orange"
           />
         </section>
 
         <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-end 2xl:justify-between">
-            <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-5">
               <div>
                 <label className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-700">
                   <FaCalendarAlt />
-                  วันที่
+                  วันที่เริ่มต้น
                 </label>
 
                 <input
                   type="date"
-                  value={selectedDate}
-                  onChange={(event) => setSelectedDate(event.target.value)}
+                  value={startDate}
+                  onChange={(event) => setStartDate(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none focus:border-red-500"
+                />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  วันที่สิ้นสุด
+                </label>
+
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(event) => setEndDate(event.target.value)}
+                  min={startDate}
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none focus:border-red-500"
                 />
               </div>
@@ -390,11 +511,32 @@ export default function StockMovementsPage() {
                   className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none focus:border-red-500"
                 >
                   <option value="all">ทั้งหมด</option>
-                  <option value="stock_in">รับสินค้าเข้า</option>
-                  <option value="sale_out">ขายออก</option>
-                  <option value="initial_stock">สต๊อกเริ่มต้น</option>
-                  <option value="adjustment_in">ปรับเพิ่มสต๊อก</option>
-                  <option value="adjustment_out">ปรับลดสต๊อก</option>
+                  <option value="stock_in">เพิ่มสต็อก</option>
+                  <option value="sale_out">เบิก/ตัดสต็อก</option>
+                  <option value="stock_out">เบิก/ตัดสต็อก</option>
+                  <option value="initial_stock">สต็อกเริ่มต้น</option>
+                  <option value="adjustment_in">ปรับเพิ่มสต็อก</option>
+                  <option value="adjustment_out">ปรับลดสต็อก</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  พนักงานผู้ดำเนินการ
+                </label>
+
+                <select
+                  value={employeeFilter}
+                  onChange={(event) => setEmployeeFilter(event.target.value)}
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-800 outline-none focus:border-red-500"
+                >
+                  <option value="all">พนักงานทุกคน</option>
+
+                  {employeeOptions.map((employee) => (
+                    <option key={employee.key} value={employee.key}>
+                      {employee.code} - {employee.name}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -416,15 +558,25 @@ export default function StockMovementsPage() {
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={isRefreshing || isLoading}
-              className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
-            >
-              <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
-              {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={handleClearFilters}
+                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50"
+              >
+                ล้างตัวกรอง
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRefresh}
+                disabled={isRefreshing || isLoading}
+                className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-6 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
+              >
+                <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
+                {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
+              </button>
+            </div>
           </div>
         </section>
 
@@ -436,12 +588,13 @@ export default function StockMovementsPage() {
               </h2>
 
               <p className="mt-1 text-sm text-slate-500">
-                พบ {filteredMovements.length} รายการ
+                พบ {filteredMovements.length.toLocaleString()} จาก{" "}
+                {movements.length.toLocaleString()} รายการ
               </p>
             </div>
 
             <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600">
-              วันที่ {formatDate(selectedDate)}
+              {formatDateRange(startDate, endDate)}
             </span>
           </div>
 
@@ -453,7 +606,7 @@ export default function StockMovementsPage() {
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1180px] text-sm">
+            <table className="w-full min-w-[1450px] text-sm">
               <thead>
                 <tr className="bg-slate-50 text-slate-600">
                   <th className="px-5 py-4 text-left font-semibold">
@@ -478,7 +631,10 @@ export default function StockMovementsPage() {
                     หลัง
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
-                    ผู้ดำเนินการ
+                    รหัสพนักงาน
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ชื่อผู้ดำเนินการ
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
                     หมายเหตุ
@@ -490,7 +646,7 @@ export default function StockMovementsPage() {
                 {isLoading && (
                   <tr>
                     <td
-                      colSpan="9"
+                      colSpan="10"
                       className="px-6 py-16 text-center text-slate-500"
                     >
                       กำลังโหลดข้อมูลประวัติสต๊อก...
@@ -502,6 +658,7 @@ export default function StockMovementsPage() {
                   filteredMovements.map((movement) => {
                     const info = getMovementInfo(movement.movement_type);
                     const incoming = isStockIn(movement.movement_type);
+                    const outgoing = isStockOut(movement.movement_type);
                     const quantity = getMovementQuantity(movement);
 
                     return (
@@ -533,10 +690,14 @@ export default function StockMovementsPage() {
 
                         <td
                           className={`px-5 py-4 text-right font-bold ${
-                            incoming ? "text-emerald-600" : "text-red-600"
+                            incoming
+                              ? "text-emerald-600"
+                              : outgoing
+                              ? "text-red-600"
+                              : "text-slate-600"
                           }`}
                         >
-                          {incoming ? "+" : "-"}
+                          {incoming ? "+" : outgoing ? "-" : ""}
                           {quantity} {movement.unit || "ชิ้น"}
                         </td>
 
@@ -548,14 +709,12 @@ export default function StockMovementsPage() {
                           {movement.stock_after ?? "-"}
                         </td>
 
-                        <td className="px-5 py-4">
-                          <p className="font-medium text-slate-900">
-                            {movement.performed_by_name || "ระบบ"}
-                          </p>
+                        <td className="px-5 py-4 font-semibold">
+                          {movement.performed_by_code || "-"}
+                        </td>
 
-                          <p className="mt-1 text-xs text-slate-400">
-                            {movement.performed_by_code || "-"}
-                          </p>
+                        <td className="px-5 py-4">
+                          {movement.performed_by_name || "ระบบ"}
                         </td>
 
                         <td className="max-w-[240px] px-5 py-4 text-slate-500">
@@ -570,10 +729,10 @@ export default function StockMovementsPage() {
                 {!isLoading && filteredMovements.length === 0 && (
                   <tr>
                     <td
-                      colSpan="9"
+                      colSpan="10"
                       className="px-6 py-16 text-center text-slate-500"
                     >
-                      ยังไม่มีประวัติสต๊อกในวันที่เลือก
+                      ยังไม่มีประวัติสต๊อกตามตัวกรองที่เลือก
                     </td>
                   </tr>
                 )}
@@ -629,10 +788,10 @@ function SummaryCard({ icon, title, value, detail, color }) {
       <div className={`absolute left-0 top-0 h-1 w-full ${style.line}`} />
 
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-medium text-slate-500">{title}</p>
 
-          <h2 className="mt-3 text-3xl font-bold text-slate-900">
+          <h2 className="mt-3 break-words text-2xl font-bold text-slate-900">
             {value}
           </h2>
 
@@ -640,7 +799,7 @@ function SummaryCard({ icon, title, value, detail, color }) {
         </div>
 
         <div
-          className={`flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${style.icon}`}
+          className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-xl ${style.icon}`}
         >
           {icon}
         </div>

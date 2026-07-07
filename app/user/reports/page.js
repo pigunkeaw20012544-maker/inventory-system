@@ -11,13 +11,16 @@ import { supabase } from "../../lib/supabase";
 
 import {
   FaBox,
+  FaBoxOpen,
   FaCalendarAlt,
   FaChartBar,
   FaFileExcel,
+  FaHistory,
   FaHome,
   FaPrint,
   FaShoppingCart,
   FaSyncAlt,
+  FaUsers,
 } from "react-icons/fa";
 
 function getLocalDateString(date = new Date()) {
@@ -26,6 +29,17 @@ function getLocalDateString(date = new Date()) {
   return new Date(date.getTime() - offset * 60 * 1000)
     .toISOString()
     .slice(0, 10);
+}
+
+function getDaysAfterString(value, daysAfter = 1) {
+  const [year, month, day] = String(value).split("-").map(Number);
+  const date = new Date(year, month - 1, day + daysAfter);
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function getMonthValue(date = new Date()) {
@@ -130,6 +144,8 @@ export default function UserReportsPage() {
 
   const [sales, setSales] = useState([]);
   const [saleItems, setSaleItems] = useState([]);
+  const [stockMovements, setStockMovements] = useState([]);
+
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -148,26 +164,72 @@ export default function UserReportsPage() {
     setErrorMessage("");
 
     try {
-      const { data: salesData, error: salesError } = await supabase
-        .from("sales")
-        .select(`
-          id,
-          sale_number,
-          sale_date,
-          seller_name,
-          note,
-          total_amount,
-          created_at
-        `)
-        .gte("sale_date", periodRange.startDate)
-        .lte("sale_date", periodRange.endDate)
-        .order("created_at", { ascending: false });
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-      if (salesError) {
-        throw salesError;
+      if (authError || !user) {
+        throw new Error("ไม่พบข้อมูลผู้ใช้งาน");
       }
 
-      const salesList = salesData || [];
+      const nextEndDate = getDaysAfterString(periodRange.endDate);
+
+      const [salesResponse, stockMovementsResponse] = await Promise.all([
+        supabase
+          .from("sales")
+          .select(`
+            id,
+            sale_number,
+            sale_date,
+            seller_name,
+            note,
+            total_amount,
+            created_at
+          `)
+          .gte("sale_date", periodRange.startDate)
+          .lte("sale_date", periodRange.endDate)
+          .order("created_at", { ascending: false }),
+
+        supabase
+          .from("stock_movements")
+          .select(`
+            id,
+            product_code,
+            product_name,
+            unit,
+            movement_type,
+            quantity,
+            stock_before,
+            stock_after,
+            note,
+            performed_by_user_id,
+            performed_by_name,
+            performed_by_code,
+            created_at
+          `)
+          .eq("performed_by_user_id", user.id)
+          .eq("movement_type", "stock_in")
+          .gte(
+            "created_at",
+            `${periodRange.startDate}T00:00:00+07:00`
+          )
+          .lt(
+            "created_at",
+            `${nextEndDate}T00:00:00+07:00`
+          )
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (salesResponse.error) {
+        throw salesResponse.error;
+      }
+
+      if (stockMovementsResponse.error) {
+        throw stockMovementsResponse.error;
+      }
+
+      const salesList = salesResponse.data || [];
       const saleIds = salesList.map((sale) => sale.id);
 
       let items = [];
@@ -194,11 +256,17 @@ export default function UserReportsPage() {
 
       setSales(salesList);
       setSaleItems(items);
+      setStockMovements(stockMovementsResponse.data || []);
     } catch (error) {
       console.error(error);
+
       setSales([]);
       setSaleItems([]);
-      setErrorMessage(error.message || "ไม่สามารถโหลดข้อมูลรายงานได้");
+      setStockMovements([]);
+
+      setErrorMessage(
+        error.message || "ไม่สามารถโหลดข้อมูลรายงานได้"
+      );
     } finally {
       setIsLoading(false);
     }
@@ -208,7 +276,7 @@ export default function UserReportsPage() {
     void loadReport();
 
     const channel = supabase
-      .channel("user-stock-out-reports-live")
+      .channel("user-stock-reports-live")
       .on(
         "postgres_changes",
         {
@@ -226,6 +294,17 @@ export default function UserReportsPage() {
           event: "*",
           schema: "public",
           table: "sale_items",
+        },
+        () => {
+          void loadReport();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "stock_movements",
         },
         () => {
           void loadReport();
@@ -298,6 +377,23 @@ export default function UserReportsPage() {
     );
   }, [saleItems]);
 
+  const stockInQuantity = useMemo(() => {
+    return stockMovements.reduce(
+      (sum, item) => sum + toNumber(item.quantity),
+      0
+    );
+  }, [stockMovements]);
+
+  const stockInProductCount = useMemo(() => {
+    const productSet = new Set(
+      stockMovements
+        .map((item) => item.product_code || item.product_name || "")
+        .filter(Boolean)
+    );
+
+    return productSet.size;
+  }, [stockMovements]);
+
   const chartData = useMemo(() => {
     const grouped = sales.reduce((result, sale) => {
       const stockOutDate = String(sale.sale_date || "");
@@ -341,21 +437,24 @@ export default function UserReportsPage() {
   }
 
   function exportCsv() {
-    if (sales.length === 0) {
+    if (sales.length === 0 && stockMovements.length === 0) {
       alert("ไม่มีข้อมูลสำหรับ Export");
       return;
     }
 
     const rows = [
       [
-        "วันที่ตัดสต็อก",
-        "เลขที่รายการ",
-        "ผู้ดำเนินการ",
-        "จำนวนสินค้า",
-        "จำนวนรายการ",
-        "มูลค่ารวม",
+        "ประเภท",
+        "วันเวลา",
+        "รหัสพนักงาน",
+        "ชื่อพนักงาน",
+        "เลขที่รายการ / รหัสสินค้า",
+        "สินค้า",
+        "จำนวน",
+        "มูลค่ารวม / สต็อกก่อน-หลัง",
         "หมายเหตุ",
       ],
+
       ...sales.map((sale) => {
         const itemSummary = summaryBySale[sale.id] || {
           quantity: 0,
@@ -363,15 +462,33 @@ export default function UserReportsPage() {
         };
 
         return [
-          formatDate(sale.sale_date),
-          sale.sale_number || "-",
+          "เบิก/ตัดสต็อก",
+          `${formatDate(sale.sale_date)} ${formatDateTime(
+            sale.created_at
+          )}`,
+          "-",
           sale.seller_name || "-",
-          itemSummary.quantity,
-          itemSummary.lines,
-          formatMoney(sale.total_amount),
+          sale.sale_number || "-",
+          `${itemSummary.lines} รายการสินค้า`,
+          `${itemSummary.quantity} ชิ้น`,
+          `${formatMoney(sale.total_amount)} บาท`,
           sale.note || "",
         ];
       }),
+
+      ...stockMovements.map((movement) => [
+        "เพิ่มสต็อก",
+        formatDateTime(movement.created_at),
+        movement.performed_by_code || "-",
+        movement.performed_by_name || "User",
+        movement.product_code || "-",
+        movement.product_name || "-",
+        `+${toNumber(movement.quantity)} ${movement.unit || "ชิ้น"}`,
+        `${toNumber(movement.stock_before)} → ${toNumber(
+          movement.stock_after
+        )}`,
+        movement.note || "",
+      ]),
     ];
 
     const csv =
@@ -385,7 +502,7 @@ export default function UserReportsPage() {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `stock-out-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
+    link.download = `my-stock-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
 
     document.body.appendChild(link);
     link.click();
@@ -444,7 +561,7 @@ export default function UserReportsPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                รายงานตัดสต็อก
+                รายงานของฉัน
               </h1>
 
               <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
@@ -453,7 +570,7 @@ export default function UserReportsPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              รายงานรายการเบิก/ตัดสต็อกรายวัน รายเดือน และรายปี
+              รายงานเบิก/ตัดสต็อก และประวัติการเพิ่มสต็อกของฉัน
             </p>
           </div>
 
@@ -560,7 +677,7 @@ export default function UserReportsPage() {
           </h2>
 
           <p className="mt-1 text-slate-500">
-            สรุปรายการเบิก/ตัดสต็อกตามช่วงเวลาที่เลือก
+            สรุปรายการเบิก/ตัดสต็อก และเพิ่มสต็อกตามช่วงเวลาที่เลือก
           </p>
         </section>
 
@@ -599,6 +716,29 @@ export default function UserReportsPage() {
             )} บาท`}
             detail="คำนวณจากมูลค่ารวม"
             color="blue"
+          />
+        </section>
+
+        <section className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-3">
+          <SummaryCard
+            title="จำนวนครั้งเพิ่มสต็อก"
+            value={`${stockMovements.length.toLocaleString()} ครั้ง`}
+            detail="รายการที่ฉันเพิ่มสต็อก"
+            color="blue"
+          />
+
+          <SummaryCard
+            title="จำนวนสินค้าเพิ่มเข้า"
+            value={`${stockInQuantity.toLocaleString()} ชิ้น`}
+            detail="รวมจำนวนสินค้าที่ฉันเพิ่ม"
+            color="green"
+          />
+
+          <SummaryCard
+            title="สินค้าที่เพิ่มสต็อก"
+            value={`${stockInProductCount.toLocaleString()} รายการ`}
+            detail="จำนวนประเภทสินค้าที่เพิ่ม"
+            color="orange"
           />
         </section>
 
@@ -794,6 +934,125 @@ export default function UserReportsPage() {
                       className="px-6 py-16 text-center text-slate-500"
                     >
                       ยังไม่มีรายการตัดสต็อกในช่วงเวลาที่เลือก
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mt-6 overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-emerald-100 bg-emerald-50 p-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                <FaHistory className="text-xl" />
+              </div>
+
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">
+                  ประวัติการเพิ่มสต็อกของฉัน
+                </h2>
+
+                <p className="mt-1 text-slate-500">
+                  แสดงเฉพาะรายการที่คุณเพิ่มสต็อกด้วยบัญชีนี้
+                </p>
+              </div>
+            </div>
+
+            <span className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-700">
+              {stockMovements.length.toLocaleString()} รายการ
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1150px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-slate-600">
+                  <th className="px-5 py-4 text-left font-semibold">#</th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    วันเวลาเพิ่มสต็อก
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    รหัสพนักงาน
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ชื่อพนักงาน
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    สินค้า
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    จำนวนเพิ่ม
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    สต็อกก่อน / หลัง
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    หมายเหตุ
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {stockMovements.length > 0 ? (
+                  stockMovements.map((movement, index) => (
+                    <tr
+                      key={movement.id}
+                      className="border-t border-slate-100 text-slate-700 hover:bg-emerald-50/40"
+                    >
+                      <td className="px-5 py-4 text-slate-400">
+                        {index + 1}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        {formatDateTime(movement.created_at)}
+                      </td>
+
+                      <td className="px-5 py-4 font-semibold">
+                        {movement.performed_by_code || "-"}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        {movement.performed_by_name || "User"}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <p className="font-semibold text-slate-900">
+                          {movement.product_name || "-"}
+                        </p>
+
+                        <p className="mt-1 font-mono text-xs text-slate-400">
+                          {movement.product_code || "-"}
+                        </p>
+                      </td>
+
+                      <td className="px-5 py-4 text-center">
+                        <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1.5 font-semibold text-emerald-700">
+                          +{toNumber(movement.quantity)}{" "}
+                          {movement.unit || "ชิ้น"}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-center font-medium">
+                        {toNumber(movement.stock_before)} /{" "}
+                        {toNumber(movement.stock_after)}
+                      </td>
+
+                      <td className="max-w-[240px] px-5 py-4 text-slate-500">
+                        <p className="truncate">{movement.note || "-"}</p>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td
+                      colSpan="8"
+                      className="px-6 py-16 text-center text-slate-500"
+                    >
+                      {isLoading
+                        ? "กำลังโหลดข้อมูล..."
+                        : "ยังไม่มีประวัติการเพิ่มสต็อกในช่วงเวลาที่เลือก"}
                     </td>
                   </tr>
                 )}

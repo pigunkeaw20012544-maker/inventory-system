@@ -11,6 +11,7 @@ import { supabase } from "../lib/supabase";
 
 import {
   FaBox,
+  FaBoxOpen,
   FaCalendarAlt,
   FaChartBar,
   FaCheckCircle,
@@ -31,6 +32,17 @@ function getLocalDateString(date = new Date()) {
   return new Date(date.getTime() - offset * 60 * 1000)
     .toISOString()
     .slice(0, 10);
+}
+
+function getDaysAfterString(value, daysAfter = 1) {
+  const [year, month, day] = String(value).split("-").map(Number);
+  const date = new Date(year, month - 1, day + daysAfter);
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
 }
 
 function getMonthValue(date = new Date()) {
@@ -135,6 +147,7 @@ export default function ReportsPage() {
 
   const [sales, setSales] = useState([]);
   const [saleItems, setSaleItems] = useState([]);
+  const [stockMovements, setStockMovements] = useState([]);
   const [closingInfo, setClosingInfo] = useState(null);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -156,8 +169,13 @@ export default function ReportsPage() {
     setErrorMessage("");
 
     const { startDate, endDate } = periodRange;
+    const nextEndDate = getDaysAfterString(endDate);
 
-    const [salesResponse, closingResponse] = await Promise.all([
+    const [
+      salesResponse,
+      closingResponse,
+      stockMovementsResponse,
+    ] = await Promise.all([
       supabase
         .from("sales")
         .select(`
@@ -186,6 +204,27 @@ export default function ReportsPage() {
         .eq("period_start", startDate)
         .eq("period_end", endDate)
         .maybeSingle(),
+
+      supabase
+        .from("stock_movements")
+        .select(`
+          id,
+          product_code,
+          product_name,
+          unit,
+          movement_type,
+          quantity,
+          stock_before,
+          stock_after,
+          note,
+          performed_by_name,
+          performed_by_code,
+          created_at
+        `)
+        .eq("movement_type", "stock_in")
+        .gte("created_at", `${startDate}T00:00:00+07:00`)
+        .lt("created_at", `${nextEndDate}T00:00:00+07:00`)
+        .order("created_at", { ascending: false }),
     ]);
 
     if (salesResponse.error) {
@@ -197,6 +236,7 @@ export default function ReportsPage() {
 
       setSales([]);
       setSaleItems([]);
+      setStockMovements([]);
       setClosingInfo(null);
       setIsLoading(false);
       return;
@@ -207,6 +247,17 @@ export default function ReportsPage() {
       setClosingInfo(null);
     } else {
       setClosingInfo(closingResponse.data || null);
+    }
+
+    if (stockMovementsResponse.error) {
+      console.error(stockMovementsResponse.error);
+      setStockMovements([]);
+      setErrorMessage(
+        stockMovementsResponse.error.message ||
+          "ไม่สามารถโหลดประวัติการเพิ่มสต็อกได้"
+      );
+    } else {
+      setStockMovements(stockMovementsResponse.data || []);
     }
 
     const salesList = salesResponse.data || [];
@@ -262,6 +313,15 @@ export default function ReportsPage() {
           event: "*",
           schema: "public",
           table: "sale_items",
+        },
+        () => void loadReport()
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "stock_movements",
         },
         () => void loadReport()
       )
@@ -334,6 +394,42 @@ export default function ReportsPage() {
 
   const topProduct = topProducts[0];
 
+  const stockInQuantity = useMemo(() => {
+    return stockMovements.reduce(
+      (sum, movement) => sum + toNumber(movement.quantity),
+      0
+    );
+  }, [stockMovements]);
+
+  const stockInEmployeeCount = useMemo(() => {
+    const employees = new Set(
+      stockMovements
+        .map((movement) => {
+          return (
+            movement.performed_by_code ||
+            movement.performed_by_name ||
+            ""
+          );
+        })
+        .filter(Boolean)
+    );
+
+    return employees.size;
+  }, [stockMovements]);
+
+  const stockInProductCount = useMemo(() => {
+    const productSet = new Set(
+      stockMovements
+        .map(
+          (movement) =>
+            movement.product_code || movement.product_name || ""
+        )
+        .filter(Boolean)
+    );
+
+    return productSet.size;
+  }, [stockMovements]);
+
   const chartData = useMemo(() => {
     const grouped = sales.reduce((result, sale) => {
       let key = sale.sale_date;
@@ -401,19 +497,20 @@ export default function ReportsPage() {
   }
 
   function exportCsv() {
-    if (sales.length === 0) {
+    if (sales.length === 0 && stockMovements.length === 0) {
       alert("ไม่มีข้อมูลสำหรับ Export");
       return;
     }
 
     const rows = [
       [
-        "วันที่ตัดสต็อก",
-        "เลขที่รายการ",
+        "ประเภท",
+        "วันที่ / เวลา",
+        "เลขที่รายการ / รหัสสินค้า",
         "ผู้ดำเนินการ",
-        "จำนวนสินค้า",
-        "จำนวนรายการ",
-        "มูลค่ารวม",
+        "สินค้า",
+        "จำนวน",
+        "มูลค่ารวม / สต็อกก่อน-หลัง",
         "หมายเหตุ",
       ],
 
@@ -424,13 +521,31 @@ export default function ReportsPage() {
         };
 
         return [
-          formatDate(sale.sale_date),
+          "เบิก/ตัดสต็อก",
+          `${formatDate(sale.sale_date)} ${formatDateTime(sale.created_at)}`,
           sale.sale_number || "-",
           sale.seller_name || "-",
-          summary.quantity,
-          summary.lines,
-          formatMoney(sale.total_amount),
+          `${summary.lines} รายการสินค้า`,
+          `${summary.quantity} ชิ้น`,
+          `${formatMoney(sale.total_amount)} บาท`,
           sale.note || "",
+        ];
+      }),
+
+      ...stockMovements.map((movement) => {
+        return [
+          "เพิ่มสต็อก",
+          formatDateTime(movement.created_at),
+          movement.product_code || "-",
+          `${movement.performed_by_code || "-"} ${
+            movement.performed_by_name || ""
+          }`.trim(),
+          movement.product_name || "-",
+          `+${toNumber(movement.quantity)} ${movement.unit || "ชิ้น"}`,
+          `${toNumber(movement.stock_before)} → ${toNumber(
+            movement.stock_after
+          )}`,
+          movement.note || "",
         ];
       }),
     ];
@@ -446,7 +561,7 @@ export default function ReportsPage() {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = `stock-out-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
+    link.download = `inventory-report-${reportType}-${periodRange.startDate}-to-${periodRange.endDate}.csv`;
 
     document.body.appendChild(link);
     link.click();
@@ -458,7 +573,8 @@ export default function ReportsPage() {
   function printReport() {
     window.print();
   }
-    return (
+
+  return (
     <div className="min-h-screen bg-slate-50 flex">
       <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white print:hidden">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
@@ -500,7 +616,7 @@ export default function ReportsPage() {
 
           <Menu
             icon={<FaHistory />}
-            text="ประวัติสต๊อก"
+            text="ประวัติสต็อก"
             href="/stock-movements"
           />
 
@@ -524,7 +640,7 @@ export default function ReportsPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                รายงานตัดสต็อก
+                รายงานสต็อกสินค้า
               </h1>
 
               <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
@@ -533,7 +649,7 @@ export default function ReportsPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              สรุปรายการเบิก/ตัดสต็อกรายวัน รายเดือน รายปี และตรวจสอบย้อนหลัง
+              สรุปรายการเบิก/ตัดสต็อก และประวัติเพิ่มสต็อกของพนักงาน
             </p>
           </div>
 
@@ -542,7 +658,7 @@ export default function ReportsPage() {
 
         <div className="hidden print:block">
           <h1 className="text-3xl font-bold text-slate-900">
-            รายงานตัดสต็อก
+            รายงานสต็อกสินค้า
           </h1>
 
           <p className="mt-2 text-slate-600">
@@ -559,21 +675,21 @@ export default function ReportsPage() {
             <PeriodButton
               active={reportType === "daily"}
               title="รายวัน"
-              detail="ดูรายการของวันที่เลือก"
+              detail="ดูข้อมูลของวันที่เลือก"
               onClick={() => setReportType("daily")}
             />
 
             <PeriodButton
               active={reportType === "monthly"}
               title="รายเดือน"
-              detail="ดูรายการรวมทั้งเดือน"
+              detail="ดูข้อมูลรวมทั้งเดือน"
               onClick={() => setReportType("monthly")}
             />
 
             <PeriodButton
               active={reportType === "yearly"}
               title="รายปี"
-              detail="ดูรายการรวมทั้งปี"
+              detail="ดูข้อมูลรวมทั้งปี"
               onClick={() => setReportType("yearly")}
             />
           </div>
@@ -655,7 +771,7 @@ export default function ReportsPage() {
           </div>
 
           <p className="mt-5 text-sm text-slate-500">
-            การปิดยอดจะบันทึกยอดสรุปของช่วงเวลาไว้ โดยไม่ลบประวัติเดิม
+            การปิดยอดใช้สำหรับสรุปรายการตัดสต็อก โดยไม่ลบประวัติการเพิ่มสต็อก
           </p>
         </section>
 
@@ -695,13 +811,13 @@ export default function ReportsPage() {
           </h2>
 
           <p className="mt-1 text-slate-500">
-            สรุปข้อมูลการเบิก/ตัดสต็อกตามช่วงเวลาที่เลือก
+            สรุปรายการเบิก/ตัดสต็อกและเพิ่มสต็อกตามช่วงเวลาที่เลือก
           </p>
         </section>
 
         <section className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
           <SummaryCard
-            title="มูลค่ารวม"
+            title="มูลค่าตัดสต็อกรวม"
             value={`฿ ${formatMoney(totalValue)}`}
             detail={`${sales.length.toLocaleString()} รายการ`}
             icon={<FaShoppingCart />}
@@ -734,6 +850,40 @@ export default function ReportsPage() {
             detail="คำนวณจากมูลค่ารวม"
             icon={<FaChartBar />}
             color="blue"
+          />
+        </section>
+
+        <section className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+          <SummaryCard
+            title="จำนวนครั้งเพิ่มสต็อก"
+            value={`${stockMovements.length.toLocaleString()} ครั้ง`}
+            detail="รายการรับเข้าในช่วงเวลานี้"
+            icon={<FaHistory />}
+            color="blue"
+          />
+
+          <SummaryCard
+            title="จำนวนสินค้าเพิ่มเข้า"
+            value={`${stockInQuantity.toLocaleString()} ชิ้น`}
+            detail="รวมสินค้าที่เพิ่มสต็อก"
+            icon={<FaBoxOpen />}
+            color="green"
+          />
+
+          <SummaryCard
+            title="ผู้เพิ่มสต็อก"
+            value={`${stockInEmployeeCount.toLocaleString()} คน`}
+            detail="พนักงานที่เพิ่มสต็อก"
+            icon={<FaUsers />}
+            color="orange"
+          />
+
+          <SummaryCard
+            title="สินค้าที่รับเข้า"
+            value={`${stockInProductCount.toLocaleString()} รายการ`}
+            detail="จำนวนสินค้าที่ถูกเพิ่มสต็อก"
+            icon={<FaBox />}
+            color="red"
           />
         </section>
 
@@ -943,6 +1093,125 @@ export default function ReportsPage() {
                       {isLoading
                         ? "กำลังโหลดข้อมูล..."
                         : "ยังไม่มีรายการตัดสต็อกในช่วงเวลาที่เลือก"}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="mt-6 overflow-hidden rounded-3xl border border-emerald-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-emerald-100 bg-emerald-50 p-6 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                <FaHistory className="text-xl" />
+              </div>
+
+              <div>
+                <h2 className="text-2xl font-bold text-slate-900">
+                  ประวัติการเพิ่มสต็อกสินค้า
+                </h2>
+
+                <p className="mt-1 text-slate-500">
+                  แสดงพนักงานที่เพิ่มสินค้าเข้าสต็อกตามช่วงเวลาที่เลือก
+                </p>
+              </div>
+            </div>
+
+            <span className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-emerald-700">
+              {stockMovements.length.toLocaleString()} รายการ
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1150px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 text-slate-600">
+                  <th className="px-5 py-4 text-left font-semibold">#</th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    วันเวลาเพิ่มสต็อก
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    รหัสพนักงาน
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    ชื่อพนักงาน
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    สินค้า
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    จำนวนเพิ่ม
+                  </th>
+                  <th className="px-5 py-4 text-center font-semibold">
+                    สต็อกก่อน / หลัง
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
+                    หมายเหตุ
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {stockMovements.length > 0 ? (
+                  stockMovements.map((movement, index) => (
+                    <tr
+                      key={movement.id}
+                      className="border-t border-slate-100 text-slate-700 hover:bg-emerald-50/40"
+                    >
+                      <td className="px-5 py-4 text-slate-400">
+                        {index + 1}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        {formatDateTime(movement.created_at)}
+                      </td>
+
+                      <td className="px-5 py-4 font-semibold">
+                        {movement.performed_by_code || "-"}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        {movement.performed_by_name || "ไม่ระบุชื่อ"}
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <p className="font-semibold text-slate-900">
+                          {movement.product_name || "-"}
+                        </p>
+
+                        <p className="mt-1 font-mono text-xs text-slate-400">
+                          {movement.product_code || "-"}
+                        </p>
+                      </td>
+
+                      <td className="px-5 py-4 text-center">
+                        <span className="inline-flex rounded-full bg-emerald-100 px-3 py-1.5 font-semibold text-emerald-700">
+                          +{toNumber(movement.quantity)}{" "}
+                          {movement.unit || "ชิ้น"}
+                        </span>
+                      </td>
+
+                      <td className="px-5 py-4 text-center font-medium">
+                        {toNumber(movement.stock_before)} /{" "}
+                        {toNumber(movement.stock_after)}
+                      </td>
+
+                      <td className="max-w-[240px] px-5 py-4 text-slate-500">
+                        <p className="truncate">{movement.note || "-"}</p>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td
+                      colSpan="8"
+                      className="px-6 py-14 text-center text-slate-500"
+                    >
+                      {isLoading
+                        ? "กำลังโหลดข้อมูล..."
+                        : "ยังไม่มีประวัติการเพิ่มสต็อกในช่วงเวลาที่เลือก"}
                     </td>
                   </tr>
                 )}

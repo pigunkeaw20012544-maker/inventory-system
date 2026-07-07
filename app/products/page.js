@@ -322,14 +322,19 @@ export default function ProductsPage() {
   }
 
   async function openAddModal() {
-    await loadCategories();
+  await loadCategories();
 
-    setModalMode("add");
-    setEditingProduct(null);
-    setFormData(emptyForm);
-    setFormError("");
-    setShowProductModal(true);
-  }
+  setModalMode("add");
+  setEditingProduct(null);
+
+  setFormData({
+    ...emptyForm,
+    barcode: "",
+  });
+
+  setFormError("");
+  setShowProductModal(true);
+}
 
   async function openEditModal(product) {
     await loadCategories();
@@ -371,156 +376,161 @@ export default function ProductsPage() {
   }
 
   async function handleSaveProduct(event) {
-    event.preventDefault();
+  event.preventDefault();
 
-    const productCode = formData.product_code.trim().toUpperCase();
-    const barcode = formData.barcode.trim();
-    const name = formData.name.trim();
-    const categoryId = Number(formData.category_id);
-    const costPrice = Number(formData.cost_price);
-    const price = Number(formData.price);
-    const stock = Number(formData.stock);
+  const productCode = formData.product_code.trim().toUpperCase();
+  const barcode = formData.barcode.trim();
+  const name = formData.name.trim();
+  const categoryId = Number(formData.category_id);
+  const costPrice = Number(formData.cost_price);
+  const price = Number(formData.price);
+  const stock = Number(formData.stock);
 
-    if (
-      !productCode ||
-      !barcode ||
-      !name ||
-      !formData.category_id ||
-      formData.cost_price === "" ||
-      formData.price === "" ||
-      formData.stock === ""
-    ) {
-      setFormError("กรุณากรอกข้อมูลสินค้า ราคาต้นทุน และราคาขายให้ครบ");
-      return;
-    }
-
-    if (
-      !Number.isFinite(categoryId) ||
-      !Number.isFinite(costPrice) ||
-      !Number.isFinite(price) ||
-      !Number.isInteger(stock) ||
-      costPrice < 0 ||
-      price < 0 ||
-      stock < 0
-    ) {
-      setFormError(
-        "ต้นทุนและราคาขายต้องเป็นตัวเลข และจำนวนสต็อกต้องเป็นจำนวนเต็ม 0 หรือมากกว่า"
-      );
-      return;
-    }
-
-    const productPayload = {
-      product_code: productCode,
-      barcode,
-      name,
-      category_id: categoryId,
-      price,
-      stock,
-      unit: formData.unit.trim() || "ชิ้น",
-      status: getStatusFromStock(stock),
-    };
-
-    setIsSaving(true);
-    setFormError("");
-
-    try {
-      let savedProductId = editingProduct?.id;
-
-      if (modalMode === "add") {
-        const { data, error } = await supabase
-          .from("products")
-          .insert(productPayload)
-          .select("id")
-          .single();
-
-        if (error) {
-          throw error;
-        }
-
-        savedProductId = data.id;
-      } else {
-        const { error } = await supabase
-          .from("products")
-          .update(productPayload)
-          .eq("id", editingProduct.id);
-
-        if (error) {
-          throw error;
-        }
-      }
-
-      const { error: costError } = await supabase
-        .from("product_costs")
-        .upsert(
-          {
-            product_id: savedProductId,
-            cost_price: costPrice,
-            updated_at: new Date().toISOString(),
-          },
-          {
-            onConflict: "product_id",
-          }
-        );
-
-      if (costError) {
-        if (modalMode === "add" && savedProductId) {
-          await supabase
-            .from("products")
-            .delete()
-            .eq("id", savedProductId);
-        }
-
-        throw costError;
-      }
-
-      await loadProducts();
-
-      setShowProductModal(false);
-      setEditingProduct(null);
-      setFormData(emptyForm);
-      setFormError("");
-
-      alert(
-        modalMode === "add"
-          ? "เพิ่มสินค้าพร้อมราคาต้นทุนสำเร็จ"
-          : "แก้ไขสินค้าพร้อมราคาต้นทุนสำเร็จ"
-      );
-    } catch (error) {
-      console.error(error);
-
-      if (error.code === "23505") {
-        setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
-      } else {
-        setFormError(
-          error.message || "บันทึกสินค้าและราคาต้นทุนไม่สำเร็จ"
-        );
-      }
-    } finally {
-      setIsSaving(false);
-    }
+  if (
+    !productCode ||
+    !name ||
+    !formData.category_id ||
+    formData.cost_price === "" ||
+    formData.price === "" ||
+    formData.stock === ""
+  ) {
+    setFormError("กรุณากรอกข้อมูลสินค้า ราคาต้นทุน และราคาขายให้ครบ");
+    return;
   }
 
-  async function handleDeleteProduct(product) {
-    const confirmed = window.confirm(
-      `ต้องการลบสินค้า "${product.name}" (${product.code}) ใช่หรือไม่?`
+  if (
+    !Number.isFinite(categoryId) ||
+    !Number.isFinite(costPrice) ||
+    !Number.isFinite(price) ||
+    !Number.isInteger(stock) ||
+    costPrice < 0 ||
+    price < 0 ||
+    stock < 0
+  ) {
+    setFormError(
+      "ต้นทุนและราคาขายต้องเป็นตัวเลข และจำนวนสต็อกต้องเป็นจำนวนเต็ม 0 หรือมากกว่า"
     );
+    return;
+  }
 
-    if (!confirmed) return;
+  const productPayload = {
+    product_code: productCode,
+    name,
+    category_id: categoryId,
+    price,
+    stock,
+    unit: formData.unit.trim() || "ชิ้น",
+    status: getStatusFromStock(stock),
+  };
 
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", product.id);
+  if (modalMode === "edit") {
+    productPayload.barcode = barcode || null;
+  }
 
-    if (error) {
-      console.error(error);
-      alert(error.message || "ลบสินค้าไม่สำเร็จ");
-      return;
+  setIsSaving(true);
+  setFormError("");
+
+  try {
+    let savedProductId = editingProduct?.id;
+    let savedBarcode = barcode;
+
+    if (modalMode === "add") {
+      const { data, error } = await supabase
+        .from("products")
+        .insert(productPayload)
+        .select("id, barcode")
+        .single();
+
+      if (error) {
+        throw error;
+      }
+
+      savedProductId = data.id;
+      savedBarcode = data.barcode || "";
+    } else {
+      const { error } = await supabase
+        .from("products")
+        .update(productPayload)
+        .eq("id", editingProduct.id);
+
+      if (error) {
+        throw error;
+      }
+    }
+
+    const { error: costError } = await supabase
+      .from("product_costs")
+      .upsert(
+        {
+          product_id: savedProductId,
+          cost_price: costPrice,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "product_id",
+        }
+      );
+
+    if (costError) {
+      if (modalMode === "add" && savedProductId) {
+        await supabase
+          .from("products")
+          .delete()
+          .eq("id", savedProductId);
+      }
+
+      throw costError;
     }
 
     await loadProducts();
-    alert("ลบสินค้าสำเร็จ");
+
+    setShowProductModal(false);
+    setEditingProduct(null);
+    setFormData(emptyForm);
+    setFormError("");
+
+    alert(
+      modalMode === "add"
+        ? `เพิ่มสินค้าพร้อมราคาต้นทุนสำเร็จ
+บาร์โค้ด: ${savedBarcode || "-"}`
+        : "แก้ไขสินค้าพร้อมราคาต้นทุนสำเร็จ"
+    );
+  } catch (error) {
+    console.error(error);
+
+    if (error.code === "23505") {
+      setFormError("รหัสสินค้าหรือบาร์โค้ดนี้มีอยู่ในระบบแล้ว");
+    } else {
+      setFormError(
+        error.message || "บันทึกสินค้าและราคาต้นทุนไม่สำเร็จ"
+      );
+    }
+  } finally {
+    setIsSaving(false);
   }
+}
+
+async function handleDeleteProduct(product) {
+  const confirmed = window.confirm(
+    `ต้องการลบสินค้า "${product.name}" (${product.code}) ใช่หรือไม่?`
+  );
+
+  if (!confirmed) return;
+
+  const { error } = await supabase
+    .from("products")
+    .delete()
+    .eq("id", product.id);
+
+  if (error) {
+    console.error(error);
+    alert(error.message || "ลบสินค้าไม่สำเร็จ");
+    return;
+  }
+
+  await loadProducts();
+  alert("ลบสินค้าสำเร็จ");
+}
 
   async function handleRefresh() {
     setIsRefreshing(true);
@@ -1031,13 +1041,25 @@ export default function ProductsPage() {
                 placeholder="เช่น BEV-0009"
               />
 
-              <InputField
-                label="บาร์โค้ด"
-                name="barcode"
-                value={formData.barcode}
-                onChange={handleFormChange}
-                placeholder="เช่น 8851234500098"
-              />
+             <div>
+  <label className="mb-2 block text-sm font-medium text-slate-700">
+    บาร์โค้ด
+  </label>
+
+  <input
+    value={
+      modalMode === "add"
+        ? "ระบบจะสร้างบาร์โค้ดอัตโนมัติเมื่อบันทึก"
+        : formData.barcode || "-"
+    }
+    readOnly
+    className="w-full cursor-default rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 font-mono text-slate-700 outline-none"
+  />
+
+  <p className="mt-2 text-xs text-slate-500">
+    ระบบสร้างเลขบาร์โค้ด 13 หลักที่ไม่ซ้ำกันให้อัตโนมัติ
+  </p>
+</div>
 
               <InputField
                 label="ชื่อสินค้า"
