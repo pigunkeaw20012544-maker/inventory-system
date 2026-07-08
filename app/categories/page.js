@@ -310,14 +310,14 @@ export default function CategoriesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
-        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <aside className="w-full md:w-[290px] min-h-screen md:min-h-screen shrink-0 bg-[#182232] text-white overflow-y-auto">
+        <div className="rounded-b-2xl md:rounded-br-[42px] bg-red-600 px-4 md:px-7 py-6 md:py-8 shadow-lg">
           <div className="flex items-center gap-3">
             <BrandLogo />
 
             <div>
-              <h2 className="text-lg font-bold">
+              <h2 className="text-base md:text-lg font-bold">
                 ระบบบริหารจัดการ
               </h2>
 
@@ -328,8 +328,8 @@ export default function CategoriesPage() {
           </div>
         </div>
 
-        <nav className="space-y-2 p-5">
-          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+        <nav className="space-y-2 p-4 md:p-5 flex md:flex-col gap-2 md:gap-0 flex-wrap md:flex-nowrap">
+          <p className="hidden md:block px-4 pb-1 pt-2 text-xs text-slate-400 w-full">
             เมนูหลัก
           </p>
 
@@ -360,74 +360,76 @@ export default function CategoriesPage() {
 
           <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
 
-          <div className="pt-5">
+          <div className="pt-5 hidden md:block w-full">
             <LogoutButton />
           </div>
         </nav>
       </aside>
 
-      <main className="min-w-0 flex-1 p-6 xl:p-10">
-        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-4xl font-bold text-slate-900">
+      <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6 lg:p-8 xl:p-10 overflow-x-hidden">
+        <header className="flex flex-col gap-3 sm:gap-5 md:gap-6">
+          <div className="flex flex-col gap-2 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
                 หมวดหมู่สินค้า
               </h1>
 
-              <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
+              <span className="rounded-full bg-red-50 px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium text-red-600">
                 Admin
               </span>
             </div>
 
-            <p className="mt-2 text-slate-500">
+            <p className="text-sm sm:text-base text-slate-500">
               จัดกลุ่มสินค้าให้เป็นระเบียบ เพื่อค้นหาและบริหารสินค้าได้ง่าย
             </p>
           </div>
 
-          <AccountHeader />
+          <div className="flex justify-end">
+            <AccountHeader />
+          </div>
         </header>
 
-        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-center 2xl:justify-between">
-            <div className="flex flex-wrap gap-3">
+        <section className="mt-6 sm:mt-8 rounded-lg sm:rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+          <div className="flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 flex-wrap">
               <button
                 type="button"
                 onClick={handleRefresh}
                 disabled={isRefreshing}
-                className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-3 text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+                className="flex items-center justify-center gap-2 rounded-lg sm:rounded-xl border border-slate-200 bg-white px-3 sm:px-5 py-2 sm:py-3 text-sm sm:text-base text-slate-700 hover:bg-slate-50 disabled:opacity-60"
               >
                 <FaSyncAlt className={isRefreshing ? "animate-spin" : ""} />
-                {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรช"}
+                <span className="hidden sm:inline">{isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรช"}</span>
               </button>
 
               <button
                 type="button"
                 onClick={openAddModal}
-                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700"
+                className="flex items-center justify-center gap-2 rounded-lg sm:rounded-xl bg-red-600 px-3 sm:px-5 py-2 sm:py-3 text-sm sm:text-base text-white hover:bg-red-700"
               >
                 <FaPlus />
-                เพิ่มหมวดหมู่
+                <span>เพิ่มหมวดหมู่</span>
               </button>
             </div>
 
-            <div className="relative w-full 2xl:w-[380px]">
-              <FaSearch className="absolute left-4 top-4 text-slate-400" />
+            <div className="relative w-full lg:w-auto lg:max-w-xs">
+              <FaSearch className="absolute left-3 sm:left-4 top-2.5 sm:top-3 text-slate-400 text-sm sm:text-base" />
 
               <input
                 value={keyword}
                 onChange={(event) => setKeyword(event.target.value)}
-                placeholder="ค้นหาชื่อหรือคำอธิบายหมวดหมู่"
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-slate-800 outline-none focus:border-red-500 focus:bg-white"
+                placeholder="ค้นหาหมวดหมู่"
+                className="w-full rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 py-2 sm:py-3 pl-9 sm:pl-11 pr-3 sm:pr-4 text-sm sm:text-base text-slate-800 outline-none focus:border-red-500 focus:bg-white"
               />
             </div>
           </div>
         </section>
 
-        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+        <section className="mt-4 sm:mt-8 grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-5">
           <SummaryCard
-            title="หมวดหมู่ทั้งหมด"
+            title="ทั้งหมด"
             value={categories.length}
-            detail="หมวดหมู่ในระบบ"
+            detail="หมวดหมู่"
             icon={<FaThLarge />}
             color="blue"
           />
@@ -443,33 +445,33 @@ export default function CategoriesPage() {
           <SummaryCard
             title="ปิดใช้งาน"
             value={inactiveCount}
-            detail="พักการใช้งานชั่วคราว"
+            detail="พักการใช้งาน"
             icon={<FaExclamationTriangle />}
             color="orange"
           />
 
           <SummaryCard
-            title="หมวดหมู่ที่มีสินค้า"
+            title="มีสินค้า"
             value={categoryWithProductsCount}
-            detail="มีสินค้าภายในหมวดหมู่"
+            detail="มีสินค้า"
             icon={<FaBox />}
             color="red"
           />
         </section>
 
-        <section className="mt-8 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-4 border-b border-slate-100 p-6 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900">
+        <section className="mt-6 sm:mt-8 overflow-hidden rounded-lg sm:rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 sm:gap-4 border-b border-slate-100 p-4 sm:p-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-2xl font-bold text-slate-900">
                 รายการหมวดหมู่สินค้า
               </h2>
 
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-1 text-xs sm:text-sm text-slate-500">
                 แสดง {filteredCategories.length} จาก {categories.length} หมวดหมู่
               </p>
             </div>
 
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-1 sm:gap-2">
               <FilterButton
                 active={statusFilter === "all"}
                 onClick={() => setStatusFilter("all")}
@@ -494,31 +496,31 @@ export default function CategoriesPage() {
           </div>
 
           {pageError && (
-            <div className="m-6 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
-              <FaExclamationTriangle className="mt-1 shrink-0" />
+            <div className="m-4 sm:m-6 flex gap-2 sm:gap-3 rounded-lg sm:rounded-2xl border border-red-200 bg-red-50 p-3 sm:p-4 text-sm sm:text-base text-red-700">
+              <FaExclamationTriangle className="mt-0.5 sm:mt-1 shrink-0 text-sm sm:text-base" />
               <p>{pageError}</p>
             </div>
           )}
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1050px] text-sm">
+            <table className="w-full min-w-full text-xs sm:text-sm">
               <thead>
                 <tr className="bg-slate-50 text-slate-600">
-                  <th className="px-6 py-4 text-left font-semibold">#</th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left font-semibold">#</th>
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left font-semibold">
                     ชื่อหมวดหมู่
                   </th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left font-semibold hidden sm:table-cell">
                     คำอธิบาย
                   </th>
-                  <th className="px-6 py-4 text-center font-semibold">
-                    จำนวนสินค้า
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-center font-semibold">
+                    สินค้า
                   </th>
-                  <th className="px-6 py-4 text-left font-semibold">
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-left font-semibold hidden md:table-cell">
                     สถานะ
                   </th>
-                  <th className="px-6 py-4 text-center font-semibold">
-                    จัดการ
+                  <th className="px-3 sm:px-6 py-3 sm:py-4 text-center font-semibold">
+                    การจัดการ
                   </th>
                 </tr>
               </thead>
@@ -528,7 +530,7 @@ export default function CategoriesPage() {
                   <tr>
                     <td
                       colSpan="6"
-                      className="px-6 py-14 text-center text-slate-500"
+                      className="px-3 sm:px-6 py-8 sm:py-14 text-center text-xs sm:text-base text-slate-500"
                     >
                       กำลังโหลดข้อมูลหมวดหมู่...
                     </td>
@@ -541,55 +543,55 @@ export default function CategoriesPage() {
                       key={item.id}
                       className="border-t border-slate-100 text-slate-700 hover:bg-slate-50"
                     >
-                      <td className="px-6 py-4 text-slate-400">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-slate-400 text-xs sm:text-sm">
                         {index + 1}
                       </td>
 
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-50 text-red-600">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4">
+                        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                          <div className="flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg sm:rounded-xl bg-red-50 text-red-600 flex-shrink-0 text-sm sm:text-base">
                             <FaThLarge />
                           </div>
 
-                          <div>
-                            <p className="font-semibold text-slate-900">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-slate-900 text-xs sm:text-base truncate">
                               {item.name}
                             </p>
 
-                            <p className="mt-1 text-xs text-slate-400">
+                            <p className="mt-0.5 text-xs text-slate-400 hidden sm:block">
                               ID: {item.id}
                             </p>
                           </div>
                         </div>
                       </td>
 
-                      <td className="max-w-[330px] px-6 py-4 text-slate-500">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-slate-500 hidden sm:table-cell text-xs sm:text-sm max-w-xs truncate">
                         {item.description || "ไม่มีคำอธิบาย"}
                       </td>
 
-                      <td className="px-6 py-4 text-center">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 text-center">
                         <span
-                          className={`inline-flex rounded-full px-3 py-1.5 text-sm font-semibold ${
+                          className={`inline-flex rounded-full px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold ${
                             item.totalProducts > 0
                               ? "bg-blue-100 text-blue-700"
                               : "bg-slate-100 text-slate-500"
                           }`}
                         >
-                          {item.totalProducts} รายการ
+                          {item.totalProducts}
                         </span>
                       </td>
 
-                      <td className="px-6 py-4">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4 hidden md:table-cell">
                         <StatusBadge isActive={item.isActive} />
                       </td>
 
-                      <td className="px-6 py-4">
-                        <div className="flex justify-center gap-2">
+                      <td className="px-3 sm:px-6 py-3 sm:py-4">
+                        <div className="flex justify-center gap-1 sm:gap-2">
                           <button
                             type="button"
                             onClick={() => openEditModal(item)}
-                            className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-600 hover:bg-blue-100"
-                            title="แก้ไขหมวดหมู่"
+                            className="rounded-lg sm:rounded-xl border border-blue-200 bg-blue-50 p-2 sm:p-3 text-blue-600 hover:bg-blue-100 text-sm sm:text-base"
+                            title="แก้ไข"
                           >
                             <FaEdit />
                           </button>
@@ -597,15 +599,15 @@ export default function CategoriesPage() {
                           <button
                             type="button"
                             onClick={() => handleDeleteCategory(item)}
-                            className={`rounded-xl border p-3 ${
+                            className={`rounded-lg sm:rounded-xl border p-2 sm:p-3 text-sm sm:text-base ${
                               item.totalProducts > 0
                                 ? "border-slate-200 bg-slate-100 text-slate-400"
                                 : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
                             }`}
                             title={
                               item.totalProducts > 0
-                                ? "ไม่สามารถลบได้ เพราะยังมีสินค้าอยู่"
-                                : "ลบหมวดหมู่"
+                                ? "ไม่สามารถลบได้"
+                                : "ลบ"
                             }
                           >
                             <FaTrash />
@@ -619,7 +621,7 @@ export default function CategoriesPage() {
                   <tr>
                     <td
                       colSpan="6"
-                      className="px-6 py-14 text-center text-slate-500"
+                      className="px-3 sm:px-6 py-8 sm:py-14 text-center text-xs sm:text-base text-slate-500"
                     >
                       ไม่พบหมวดหมู่สินค้าตามเงื่อนไขที่ค้นหา
                     </td>
@@ -635,34 +637,34 @@ export default function CategoriesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
           <form
             onSubmit={handleSaveCategory}
-            className="relative w-full max-w-xl rounded-3xl bg-white p-7 shadow-2xl md:p-8"
+            className="relative w-full max-w-md sm:max-w-lg lg:max-w-xl rounded-lg sm:rounded-3xl bg-white p-4 sm:p-7 md:p-8 shadow-2xl max-h-[90vh] overflow-y-auto"
           >
             <button
               type="button"
               onClick={closeModal}
-              className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+              className="absolute right-4 sm:right-6 top-4 sm:top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
-              <FaTimes className="text-xl" />
+              <FaTimes className="text-lg sm:text-xl" />
             </button>
 
-            <h2 className="text-2xl font-bold text-slate-900">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 pr-8">
               {modalMode === "add"
                 ? "เพิ่มหมวดหมู่สินค้า"
                 : "แก้ไขหมวดหมู่สินค้า"}
             </h2>
 
-            <p className="mt-1 text-slate-500">
+            <p className="mt-1 text-xs sm:text-base text-slate-500">
               กรอกข้อมูลให้ครบ แล้วกดบันทึก
             </p>
 
             {formError && (
-              <div className="mt-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-600">
+              <div className="mt-4 sm:mt-5 rounded-lg sm:rounded-xl border border-red-200 bg-red-50 px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-base text-red-600">
                 {formError}
               </div>
             )}
 
-            <div className="mt-7">
-              <label className="mb-2 block text-sm font-medium text-slate-700">
+            <div className="mt-5 sm:mt-7">
+              <label className="mb-2 block text-xs sm:text-sm font-medium text-slate-700">
                 ชื่อหมวดหมู่สินค้า
               </label>
 
@@ -671,12 +673,12 @@ export default function CategoriesPage() {
                 value={formData.name}
                 onChange={handleFormChange}
                 placeholder="เช่น แก้วพลาสติก"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
+                className="w-full rounded-lg sm:rounded-xl border border-slate-200 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-slate-800 outline-none focus:border-red-500"
               />
             </div>
 
-            <div className="mt-5">
-              <label className="mb-2 block text-sm font-medium text-slate-700">
+            <div className="mt-4 sm:mt-5">
+              <label className="mb-2 block text-xs sm:text-sm font-medium text-slate-700">
                 คำอธิบาย
               </label>
 
@@ -686,11 +688,11 @@ export default function CategoriesPage() {
                 onChange={handleFormChange}
                 placeholder="เช่น สำหรับจัดเก็บสินค้าแก้วพลาสติกทุกขนาด"
                 rows="4"
-                className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
+                className="w-full resize-none rounded-lg sm:rounded-xl border border-slate-200 px-3 sm:px-4 py-2 sm:py-3 text-sm sm:text-base text-slate-800 outline-none focus:border-red-500"
               />
             </div>
 
-            <label className="mt-6 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4">
+            <label className="mt-5 sm:mt-6 flex cursor-pointer items-center gap-3 rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 px-3 sm:px-4 py-3 sm:py-4">
               <input
                 type="checkbox"
                 checked={formData.is_active}
@@ -700,25 +702,25 @@ export default function CategoriesPage() {
                     is_active: event.target.checked,
                   }))
                 }
-                className="h-5 w-5 accent-red-600"
+                className="h-4 w-4 sm:h-5 sm:w-5 accent-red-600"
               />
 
               <div>
-                <p className="font-medium text-slate-800">
+                <p className="font-medium text-slate-800 text-xs sm:text-base">
                   เปิดใช้งานหมวดหมู่นี้
                 </p>
 
-                <p className="mt-1 text-sm text-slate-500">
+                <p className="mt-1 text-xs text-slate-500">
                   หมวดหมู่ที่ปิดใช้งานจะยังอยู่ในระบบ แต่แยกดูได้
                 </p>
               </div>
             </label>
 
-            <div className="mt-8 flex justify-end gap-3">
+            <div className="mt-7 sm:mt-8 flex justify-end gap-2 sm:gap-3">
               <button
                 type="button"
                 onClick={closeModal}
-                className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
+                className="rounded-lg sm:rounded-xl border border-slate-200 px-4 sm:px-5 py-2 sm:py-3 text-xs sm:text-base text-slate-700 hover:bg-slate-50"
               >
                 ยกเลิก
               </button>
@@ -726,10 +728,10 @@ export default function CategoriesPage() {
               <button
                 type="submit"
                 disabled={isSaving}
-                className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
+                className="flex items-center justify-center gap-2 rounded-lg sm:rounded-xl bg-red-600 px-4 sm:px-5 py-2 sm:py-3 text-xs sm:text-base text-white hover:bg-red-700 disabled:bg-red-300"
               >
-                <FaSave />
-                {isSaving ? "กำลังบันทึก..." : "บันทึกหมวดหมู่"}
+                <FaSave className="text-sm sm:text-base" />
+                <span>{isSaving ? "กำลังบันทึก..." : "บันทึก"}</span>
               </button>
             </div>
           </form>
@@ -760,7 +762,7 @@ function FilterButton({ children, active, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-xl px-4 py-2 text-sm font-medium transition ${
+      className={`rounded-lg sm:rounded-xl px-2 sm:px-4 py-1.5 sm:py-2 text-xs sm:text-sm font-medium transition ${
         active
           ? "bg-red-600 text-white"
           : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -774,7 +776,7 @@ function FilterButton({ children, active, onClick }) {
 function StatusBadge({ isActive }) {
   return (
     <span
-      className={`inline-flex rounded-full px-3 py-1.5 text-xs font-semibold ${
+      className={`inline-flex rounded-full px-2 sm:px-3 py-1 text-xs sm:text-sm font-semibold ${
         isActive
           ? "bg-emerald-100 text-emerald-700"
           : "bg-slate-200 text-slate-600"
@@ -808,22 +810,22 @@ function SummaryCard({ title, value, detail, icon, color }) {
   const style = styles[color] || styles.blue;
 
   return (
-    <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div className="relative overflow-hidden rounded-lg sm:rounded-3xl border border-slate-200 bg-white p-3 sm:p-6 shadow-sm">
       <div className={`absolute left-0 top-0 h-1 w-full ${style.line}`} />
 
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
+      <div className="flex items-start justify-between gap-2 sm:gap-4">
+        <div className="min-w-0">
+          <p className="text-xs sm:text-sm font-medium text-slate-500">{title}</p>
 
-          <h2 className="mt-3 text-3xl font-bold text-slate-900">
+          <h2 className="mt-2 sm:mt-3 text-xl sm:text-3xl font-bold text-slate-900 truncate">
             {value}
           </h2>
 
-          <p className="mt-2 text-sm text-slate-500">{detail}</p>
+          <p className="mt-1 sm:mt-2 text-xs sm:text-sm text-slate-500 line-clamp-1">{detail}</p>
         </div>
 
         <div
-          className={`flex h-12 w-12 items-center justify-center rounded-2xl text-xl ${style.icon}`}
+          className={`flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-lg sm:rounded-2xl text-lg sm:text-xl flex-shrink-0 ${style.icon}`}
         >
           {icon}
         </div>

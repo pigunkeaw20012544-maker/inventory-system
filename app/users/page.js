@@ -368,8 +368,8 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <aside className="w-full md:w-[290px] min-h-screen md:min-h-screen shrink-0 bg-[#182232] text-white overflow-y-auto">
         <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
           <div className="flex items-center gap-3">
           <BrandLogo />

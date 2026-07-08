@@ -575,14 +575,14 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white print:hidden">
-        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <aside className="w-full md:w-[290px] min-h-screen md:min-h-screen shrink-0 bg-[#182232] text-white overflow-y-auto print:hidden">
+        <div className="rounded-b-2xl md:rounded-br-[42px] bg-red-600 px-4 md:px-7 py-6 md:py-8 shadow-lg">
           <div className="flex items-center gap-3">
             <BrandLogo />
 
             <div>
-              <h2 className="text-lg font-bold">
+              <h2 className="text-base md:text-lg font-bold">
                 ระบบบริหารจัดการ
               </h2>
 
@@ -593,8 +593,8 @@ export default function ReportsPage() {
           </div>
         </div>
 
-        <nav className="space-y-2 p-5">
-          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+        <nav className="space-y-2 p-4 md:p-5 flex md:flex-col gap-2 md:gap-0 flex-wrap md:flex-nowrap">
+          <p className="hidden md:block px-4 pb-1 pt-2 text-xs text-slate-400 w-full">
             เมนูหลัก
           </p>
 
@@ -629,21 +629,21 @@ export default function ReportsPage() {
 
           <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
 
-          <div className="pt-5">
+          <div className="pt-5 hidden md:block w-full">
             <LogoutButton />
           </div>
         </nav>
       </aside>
 
-      <main className="min-w-0 flex-1 p-6 xl:p-10">
-        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between print:hidden">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-4xl font-bold text-slate-900">
+      <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6 lg:p-8 xl:p-10 overflow-x-hidden">
+        <header className="flex flex-col gap-3 sm:gap-5 md:gap-6 lg:flex-row lg:items-start lg:justify-between print:hidden">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
                 รายงานสต็อกสินค้า
               </h1>
 
-              <span className="rounded-full bg-red-50 px-3 py-1 text-sm font-medium text-red-600">
+              <span className="rounded-full bg-red-50 px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium text-red-600">
                 Admin
               </span>
             </div>

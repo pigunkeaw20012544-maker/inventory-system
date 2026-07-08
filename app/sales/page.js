@@ -453,14 +453,14 @@ export default function SalesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <aside className="w-[290px] min-h-screen shrink-0 bg-[#182232] text-white">
-        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      <aside className="w-full md:w-[290px] min-h-screen md:min-h-screen shrink-0 bg-[#182232] text-white overflow-y-auto">
+        <div className="rounded-b-2xl md:rounded-br-[42px] bg-red-600 px-4 md:px-7 py-6 md:py-8 shadow-lg">
           <div className="flex items-center gap-3">
             <BrandLogo />
 
             <div>
-              <h2 className="text-lg font-bold">
+              <h2 className="text-base md:text-lg font-bold">
                 ระบบบริหารจัดการ
               </h2>
 
@@ -471,7 +471,7 @@ export default function SalesPage() {
           </div>
         </div>
 
-        <nav className="space-y-2 p-5">
+        <nav className="space-y-2 p-4 md:p-5 flex md:flex-col gap-2 md:gap-0 flex-wrap md:flex-nowrap">
           <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
             เมนูหลัก
           </p>

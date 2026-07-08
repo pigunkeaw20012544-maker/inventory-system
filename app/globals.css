@@ -1,20 +1,6 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@import "tailwindcss";
-
-:root {
   --background: #f8fafc;
   --foreground: #1f2937;
 }
@@ -31,14 +17,71 @@ body {
   background: var(--background);
   color: #1f2937 !important;
   font-family: Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
 }
 
-/* Login-specific small tweaks */
+/* Global responsive utilities */
+.responsive-container {
+  @apply px-4 sm:px-6 md:px-8 lg:px-10;
+}
+
+.responsive-padding {
+  @apply p-4 sm:p-6 md:p-8;
+}
+
+.responsive-grid-2 {
+  @apply grid grid-cols-1 md:grid-cols-2 gap-4;
+}
+
+.responsive-grid-3 {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4;
+}
+
+.responsive-grid-4 {
+  @apply grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4;
+}
+
+/* Responsive table wrapper */
+.table-responsive {
+  @apply w-full overflow-x-auto;
+}
+
+.table-responsive table {
+  @apply w-full border-collapse text-sm;
+}
+
+.table-responsive th,
+.table-responsive td {
+  @apply px-2 sm:px-4 py-2 sm:py-3 border border-gray-300;
+}
+
+.table-responsive th {
+  @apply bg-gray-100 font-semibold text-left;
+}
+
+/* Responsive modal wrapper */
+.modal-responsive {
+  @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+}
+
+.modal-content {
+  @apply w-full max-w-xs sm:max-w-md md:max-w-lg lg:max-w-2xl bg-white rounded-lg shadow-lg;
+}
+
+/* Login-specific responsive tweaks */
 .rounded-2xl { border-radius: 1rem; }
 
 input::placeholder { color: #94a3b8; }
 
-/* Ensure the left image doesn't cover the content on smaller screens */
-@media (max-width: 1024px) {
-  .lg\:flex { display: none; }
+/* Responsive text sizes */
+@media (max-width: 640px) {
+  .text-4xl { @apply text-2xl; }
+  .text-3xl { @apply text-xl; }
+  .text-2xl { @apply text-lg; }
+}
+
+/* Ensure proper spacing on mobile */
+@media (max-width: 768px) {
+  body { font-size: 14px; }
+  button, input, select, textarea { font-size: 16px; }
 }

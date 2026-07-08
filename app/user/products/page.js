@@ -508,14 +508,14 @@ export default function UserProductsPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <aside className="min-h-screen w-[290px] shrink-0 bg-[#182232] text-white">
-        <div className="rounded-br-[42px] bg-red-600 px-7 py-8 shadow-lg">
+    <div className="flex flex-col md:flex-row min-h-screen bg-slate-50">
+      <aside className="w-full md:w-[290px] min-h-screen md:min-h-screen shrink-0 bg-[#182232] text-white overflow-y-auto">
+        <div className="rounded-b-2xl md:rounded-br-[42px] bg-red-600 px-4 md:px-7 py-6 md:py-8 shadow-lg">
           <div className="flex items-center gap-3">
             <BrandLogo />
 
             <div>
-              <h2 className="text-lg font-bold">ระบบบริหารจัดการ</h2>
+              <h2 className="text-base md:text-lg font-bold">ระบบบริหารจัดการ</h2>
 
               <p className="text-xs text-white/80">
                 ร้านค้าปลีกอุปกรณ์เครื่องดื่ม
@@ -524,8 +524,8 @@ export default function UserProductsPage() {
           </div>
         </div>
 
-        <nav className="space-y-2 p-5">
-          <p className="px-4 pb-1 pt-2 text-xs text-slate-400">
+        <nav className="space-y-2 p-4 md:p-5 flex md:flex-col gap-2 md:gap-0 flex-wrap md:flex-nowrap">
+          <p className="hidden md:block px-4 pb-1 pt-2 text-xs text-slate-400 w-full">
             เมนูพนักงาน
           </p>
 
@@ -554,26 +554,26 @@ export default function UserProductsPage() {
             href="/user/reports"
           />
 
-          <div className="pt-5">
+          <div className="hidden md:block pt-5 w-full">
             <LogoutButton />
           </div>
         </nav>
       </aside>
 
-      <main className="min-w-0 flex-1 p-6 xl:p-10">
-        <header className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-4xl font-bold text-slate-900">
+      <main className="min-w-0 flex-1 p-3 sm:p-4 md:p-6 lg:p-8 xl:p-10 overflow-x-hidden">
+        <header className="flex flex-col gap-3 sm:gap-5 md:gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-bold text-slate-900">
                 สินค้า
               </h1>
 
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
+              <span className="rounded-full bg-blue-50 px-2 sm:px-3 py-1 text-xs sm:text-sm font-medium text-blue-600">
                 พนักงาน
               </span>
             </div>
 
-            <p className="mt-2 text-slate-500">
+            <p className="mt-1 sm:mt-2 text-sm sm:text-base text-slate-500">
               ดูสินค้า ค้นหา ยิงบาร์โค้ด และเพิ่มจำนวนสต็อกสินค้าเดิม
             </p>
           </div>
@@ -582,13 +582,13 @@ export default function UserProductsPage() {
         </header>
 
         {pageError && (
-          <section className="mt-6 flex gap-3 rounded-2xl border border-red-200 bg-red-50 p-5 text-red-700">
-            <FaExclamationTriangle className="mt-1 shrink-0" />
+          <section className="mt-4 sm:mt-6 flex gap-2 sm:gap-3 rounded-xl sm:rounded-2xl border border-red-200 bg-red-50 p-3 sm:p-5 text-xs sm:text-base text-red-700">
+            <FaExclamationTriangle className="mt-0.5 sm:mt-1 shrink-0 text-sm sm:text-base" />
             <p>{pageError}</p>
           </section>
         )}
 
-        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+        <section className="mt-6 sm:mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
           <SummaryCard
             title="สินค้าทั้งหมด"
             value={`${summary.total} รายการ`}
@@ -622,14 +622,14 @@ export default function UserProductsPage() {
           />
         </section>
 
-        <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-slate-900">
+        <section className="mt-6 sm:mt-8 rounded-xl sm:rounded-3xl border border-slate-200 bg-white p-3 sm:p-4 md:p-6 shadow-sm">
+          <div className="flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900">
                 ค้นหา ตรวจสอบ และเพิ่มสต็อก
               </h2>
 
-              <p className="mt-1 text-slate-500">
+              <p className="mt-1 text-xs sm:text-sm text-slate-500">
                 พนักงานเพิ่มได้เฉพาะจำนวนสต็อกสินค้าเดิมเท่านั้น
               </p>
             </div>
@@ -638,16 +638,16 @@ export default function UserProductsPage() {
               type="button"
               onClick={handleRefresh}
               disabled={isLoading || isRefreshing}
-              className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700 disabled:bg-red-300"
+              className="flex items-center gap-2 rounded-lg sm:rounded-xl bg-red-600 px-3 sm:px-5 py-2 sm:py-3 text-sm sm:text-base text-white hover:bg-red-700 disabled:bg-red-300 shrink-0"
             >
               <FaSyncAlt
-                className={isLoading || isRefreshing ? "animate-spin" : ""}
+                className={`text-sm sm:text-base ${isLoading || isRefreshing ? "animate-spin" : ""}`}
               />
               {isRefreshing ? "กำลังรีเฟรช..." : "รีเฟรชข้อมูล"}
             </button>
           </div>
 
-          <div className="mt-7 rounded-2xl border-2 border-dashed border-red-200 bg-red-50 p-5">
+          <div className="mt-4 sm:mt-7 rounded-lg sm:rounded-2xl border-2 border-dashed border-red-200 bg-red-50 p-3 sm:p-5">
             <label className="mb-3 flex items-center gap-2 font-bold text-slate-800">
               <FaBarcode className="text-red-600" />
               ช่องยิงบาร์โค้ดสินค้า
