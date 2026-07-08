@@ -21,6 +21,7 @@ import {
   FaSearch,
   FaShoppingCart,
   FaSyncAlt,
+  FaTimes,
   FaTrash,
 } from "react-icons/fa";
 

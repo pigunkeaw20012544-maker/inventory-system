@@ -9,6 +9,7 @@ import BrandLogo from "../../components/BrandLogo";
 import { supabase } from "../../lib/supabase";
 
 import {
+  FaBars,
   FaArrowRight,
   FaBox,
   FaBoxOpen,
@@ -17,6 +18,7 @@ import {
   FaHome,
   FaShoppingCart,
   FaSyncAlt,
+  FaTimes,
 } from "react-icons/fa";
 
 function getLocalDateString(date = new Date()) {
@@ -97,6 +99,7 @@ function getStockInfo(stock) {
 }
 
 export default function UserDashboardPage() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
 

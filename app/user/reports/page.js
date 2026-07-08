@@ -10,6 +10,7 @@ import UserDailySalesSubmission from "../../components/UserDailySalesSubmission"
 import { supabase } from "../../lib/supabase";
 
 import {
+  FaBars,
   FaBox,
   FaBoxOpen,
   FaCalendarAlt,
@@ -20,6 +21,7 @@ import {
   FaPrint,
   FaShoppingCart,
   FaSyncAlt,
+  FaTimes,
   FaUsers,
 } from "react-icons/fa";
 
@@ -135,6 +137,7 @@ function csvCell(value) {
 }
 
 export default function UserReportsPage() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [reportType, setReportType] = useState("daily");
   const [selectedDate, setSelectedDate] = useState(getLocalDateString());
   const [selectedMonth, setSelectedMonth] = useState(getMonthValue());

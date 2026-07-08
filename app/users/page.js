@@ -9,6 +9,7 @@ import { supabase } from "../lib/supabase";
 
 
 import {
+  FaBars,
   FaBox,
   FaChartBar,
   FaEdit,
@@ -90,6 +91,7 @@ async function adminRequest(url, options = {}) {
 }
 
 export default function UsersPage() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [users, setUsers] = useState([]);
   const [keyword, setKeyword] = useState("");
   const [filter, setFilter] = useState("all");

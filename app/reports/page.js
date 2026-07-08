@@ -10,6 +10,7 @@ import LogoutButton from "../components/LogoutButton";
 import { supabase } from "../lib/supabase";
 
 import {
+  FaBars,
   FaBox,
   FaBoxOpen,
   FaCalendarAlt,
@@ -23,6 +24,7 @@ import {
   FaShoppingCart,
   FaSyncAlt,
   FaThLarge,
+  FaTimes,
   FaUsers,
 } from "react-icons/fa";
 
