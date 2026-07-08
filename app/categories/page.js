@@ -10,6 +10,7 @@ import { supabase } from "../lib/supabase";
 
 import {
   FaBox,
+  FaBars,
   FaChartBar,
   FaCheckCircle,
   FaEdit,
@@ -43,6 +44,7 @@ export default function CategoriesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
 
   const [showModal, setShowModal] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [modalMode, setModalMode] = useState("add");
   const [editingCategory, setEditingCategory] = useState(null);
 
@@ -311,7 +313,32 @@ export default function CategoriesPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
-      <aside className="w-full md:w-[290px] min-h-screen md:min-h-screen shrink-0 bg-[#182232] text-white overflow-y-auto">
+      {/* Hamburger Button - Mobile Only */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="md:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-white border border-slate-200 shadow-lg text-slate-900"
+      >
+        {sidebarOpen ? <FaTimes size={20} /> : <FaBars size={20} />}
+      </button>
+
+      {/* Overlay - Mobile Only */}
+      {sidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black/50 z-30"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <aside className={`
+        fixed md:relative
+        w-full md:w-[290px]
+        h-screen md:h-auto
+        left-0 top-0
+        z-40
+        transition-transform duration-300
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        shrink-0 md:min-h-screen bg-[#182232] text-white overflow-y-auto
+      `}>
         <div className="rounded-b-2xl md:rounded-br-[42px] bg-red-600 px-4 md:px-7 py-6 md:py-8 shadow-lg">
           <div className="flex items-center gap-3">
             <BrandLogo />
@@ -741,10 +768,11 @@ export default function CategoriesPage() {
   );
 }
 
-function Menu({ icon, text, href, active }) {
+function Menu({ icon, text, href, active, onNavigate }) {
   return (
     <Link
       href={href}
+      onClick={() => onNavigate?.()}
       className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
         active
           ? "bg-red-600 text-white shadow-lg"

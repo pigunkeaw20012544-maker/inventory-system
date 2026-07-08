@@ -114,6 +114,7 @@ export default function SalesPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pageError, setPageError] = useState("");
 
@@ -476,14 +477,15 @@ export default function SalesPage() {
             เมนูหลัก
           </p>
 
-          <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" />
+          <Menu icon={<FaHome />} text="Dashboard" href="/dashboard" onNavigate={() => setSidebarOpen(false)} />
 
-          <Menu icon={<FaBox />} text="สินค้า" href="/products" />
+          <Menu icon={<FaBox />} text="สินค้า" href="/products" onNavigate={() => setSidebarOpen(false)} />
 
           <Menu
             icon={<FaThLarge />}
             text="หมวดหมู่สินค้า"
             href="/categories"
+            onNavigate={() => setSidebarOpen(false)}
           />
 
           <Menu
@@ -491,17 +493,19 @@ export default function SalesPage() {
             icon={<FaShoppingCart />}
             text="เบิก/ตัดสต็อก"
             href="/sales"
+            onNavigate={() => setSidebarOpen(false)}
           />
 
           <Menu
             icon={<FaHistory />}
             text="ประวัติสต็อก"
             href="/stock-movements"
+            onNavigate={() => setSidebarOpen(false)}
           />
 
-          <Menu icon={<FaChartBar />} text="รายงาน" href="/reports" />
+          <Menu icon={<FaChartBar />} text="รายงาน" href="/reports" onNavigate={() => setSidebarOpen(false)} />
 
-          <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" />
+          <Menu icon={<FaUsers />} text="ผู้ใช้งาน" href="/users" onNavigate={() => setSidebarOpen(false)} />
 
           <div className="pt-5">
             <LogoutButton />
@@ -968,10 +972,11 @@ export default function SalesPage() {
   );
 }
 
-function Menu({ icon, text, href, active }) {
+function Menu({ icon, text, href, active, onNavigate }) {
   return (
     <Link
       href={href}
+      onClick={() => onNavigate?.()}
       className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
         active
           ? "bg-red-600 text-white shadow-lg"

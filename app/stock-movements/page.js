@@ -9,6 +9,7 @@ import LogoutButton from "../components/LogoutButton";
 import { supabase } from "../lib/supabase";
 
 import {
+  FaBars,
   FaArrowDown,
   FaArrowUp,
   FaBox,
@@ -22,6 +23,7 @@ import {
   FaShoppingCart,
   FaSyncAlt,
   FaThLarge,
+  FaTimes,
   FaUsers,
 } from "react-icons/fa";
 
@@ -745,10 +747,11 @@ export default function StockMovementsPage() {
   );
 }
 
-function Menu({ icon, text, href, active }) {
+function Menu({ icon, text, href, active, onNavigate }) {
   return (
     <Link
       href={href}
+      onClick={() => onNavigate?.()}
       className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
         active
           ? "bg-red-600 text-white shadow-lg"

@@ -5,6 +5,7 @@ import Link from "next/link";
 import Barcode from "react-barcode";
 
 import {
+  FaBars,
   FaBarcode,
   FaBox,
   FaBoxOpen,
@@ -113,6 +114,7 @@ export default function ProductsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [pageError, setPageError] = useState("");
 
   async function loadProducts() {
@@ -1292,10 +1294,11 @@ async function handleDeleteProduct(product) {
   );
 }
 
-function Menu({ icon, text, href, active }) {
+function Menu({ icon, text, href, active, onNavigate }) {
   return (
     <Link
       href={href}
+      onClick={() => onNavigate?.()}
       className={`flex w-full items-center gap-4 rounded-xl px-4 py-3.5 transition ${
         active
           ? "bg-red-600 text-white shadow-lg"
