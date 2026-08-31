@@ -6,6 +6,7 @@ import Barcode from "react-barcode";
 
 import {
   FaBars,
+  FaArrowUp,
   FaBarcode,
   FaBox,
   FaBoxOpen,
@@ -99,6 +100,8 @@ export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [keyword, setKeyword] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [scannedProduct, setScannedProduct] = useState(null);
 
   const [selectedProduct, setSelectedProduct] = useState(null);
@@ -176,17 +179,36 @@ export default function ProductsPage() {
       price: Number(product.price || 0),
       stock: Number(product.stock || 0),
       unit: product.unit || "ชิ้น",
-      status: product.status || getStatusFromStock(product.stock),
+      status: getStatusFromStock(product.stock),
     }));
 
+    const barcodeCounts = mappedProducts.reduce((counts, product) => {
+      const barcode = String(product.barcode || "").trim();
+
+      if (barcode) {
+        counts[barcode] = (counts[barcode] || 0) + 1;
+      }
+
+      return counts;
+    }, {});
+
+    const duplicateBarcodes = Object.keys(barcodeCounts).filter(
+      (barcode) => barcodeCounts[barcode] > 1
+    );
+
     setProducts(mappedProducts);
+    if (duplicateBarcodes.length > 0) {
+      setPageError(
+        `พบ barcode ซ้ำในฐานข้อมูล ${duplicateBarcodes.length} รายการ กรุณาตรวจสอบก่อนใช้งาน`
+      );
+    }
     setIsLoading(false);
   }
 
   async function loadCategories() {
     const { data, error } = await supabase
       .from("categories")
-      .select("id, name")
+      .select("id, name, is_active")
       .order("name", { ascending: true });
 
     if (error) {
@@ -194,7 +216,12 @@ export default function ProductsPage() {
       return;
     }
 
-    setCategories(data || []);
+    setCategories(
+      (data || []).map((category) => ({
+        ...category,
+        is_active: category.is_active === true,
+      }))
+    );
   }
 
   useEffect(() => {
@@ -240,20 +267,22 @@ export default function ProductsPage() {
   const filteredProducts = useMemo(() => {
     const search = keyword.trim().toLowerCase();
 
-    if (!search) return products;
-
     return products.filter((product) =>
-      [
-        product.code,
-        product.barcode,
-        product.name,
-        product.category,
-        product.status,
-      ].some((value) =>
-        String(value || "").toLowerCase().includes(search)
-      )
+      (!search ||
+        [
+          product.code,
+          product.barcode,
+          product.name,
+          product.category,
+          product.status,
+        ].some((value) =>
+          String(value || "").toLowerCase().includes(search)
+        )) &&
+        (categoryFilter === "all" ||
+          String(product.categoryId) === String(categoryFilter)) &&
+        (statusFilter === "all" || product.status === statusFilter)
     );
-  }, [keyword, products]);
+  }, [categoryFilter, keyword, products, statusFilter]);
 
   const outOfStockProducts = useMemo(() => {
     return products.filter((product) => Number(product.stock) <= 0);
@@ -278,7 +307,13 @@ export default function ProductsPage() {
   }, [products]);
 
   const lowStockCount = useMemo(() => {
-    return products.filter((product) => Number(product.stock) < 10).length;
+    return products.filter(
+      (product) => Number(product.stock) > 0 && Number(product.stock) < 10
+    ).length;
+  }, [products]);
+
+  const outOfStockCount = useMemo(() => {
+    return products.filter((product) => Number(product.stock) <= 0).length;
   }, [products]);
 
   const inventorySaleValue = useMemo(() => {
@@ -377,6 +412,51 @@ export default function ProductsPage() {
     }));
   }
 
+  async function findProductDuplicate(field, value, excludeId) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("id")
+      .eq(field, value)
+      .limit(1);
+
+    if (error) throw error;
+
+    return (data || []).some(
+      (product) => String(product.id) !== String(excludeId || "")
+    );
+  }
+
+  async function createUniqueBarcode() {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const timestamp = Date.now().toString().slice(-11);
+      const suffix = String(attempt).padStart(2, "0");
+      const candidate = `${timestamp}${suffix}`;
+
+      if (!(await findProductDuplicate("barcode", candidate))) {
+        return candidate;
+      }
+    }
+
+    throw new Error("ไม่สามารถสร้างบาร์โค้ดที่ไม่ซ้ำได้ กรุณาลองใหม่");
+  }
+
+  async function validateCategory(categoryId, allowInactiveCurrent) {
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id, is_active")
+      .eq("id", categoryId)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) throw new Error("ไม่พบหมวดหมู่สินค้าที่เลือก");
+
+    if (!data.is_active && !allowInactiveCurrent) {
+      throw new Error("หมวดหมู่นี้ถูกปิดใช้งาน ไม่สามารถใช้กับสินค้าใหม่ได้");
+    }
+
+    return data;
+  }
+
   async function handleSaveProduct(event) {
   event.preventDefault();
 
@@ -387,6 +467,7 @@ export default function ProductsPage() {
   const costPrice = Number(formData.cost_price);
   const price = Number(formData.price);
   const stock = Number(formData.stock);
+  const unit = formData.unit.trim();
 
   if (
     !productCode ||
@@ -394,9 +475,10 @@ export default function ProductsPage() {
     !formData.category_id ||
     formData.cost_price === "" ||
     formData.price === "" ||
-    formData.stock === ""
+    formData.stock === "" ||
+    !unit
   ) {
-    setFormError("กรุณากรอกข้อมูลสินค้า ราคาต้นทุน และราคาขายให้ครบ");
+    setFormError("กรุณากรอกชื่อสินค้า หมวดหมู่ ราคา ต้นทุน จำนวน และหน่วยให้ครบ");
     return;
   }
 
@@ -415,26 +497,74 @@ export default function ProductsPage() {
     return;
   }
 
+  if (!Number.isInteger(categoryId) || stock < 0) {
+    setFormError("หมวดหมู่และจำนวนสต็อกไม่ถูกต้อง");
+    return;
+  }
+
+  if (!/^[-\wก-๙\s./]+$/.test(name)) {
+    setFormError("ชื่อสินค้ามีอักขระที่ไม่รองรับ");
+    return;
+  }
+
   const productPayload = {
     product_code: productCode,
     name,
     category_id: categoryId,
     price,
     stock,
-    unit: formData.unit.trim() || "ชิ้น",
+    unit,
     status: getStatusFromStock(stock),
   };
-
-  if (modalMode === "edit") {
-    productPayload.barcode = barcode || null;
-  }
 
   setIsSaving(true);
   setFormError("");
 
   try {
+    await validateCategory(
+      categoryId,
+      modalMode === "edit" &&
+        String(categoryId) === String(editingProduct?.categoryId)
+    );
+
+    if (await findProductDuplicate("product_code", productCode, editingProduct?.id)) {
+      throw new Error("รหัสสินค้านี้มีอยู่ในระบบแล้ว");
+    }
+
     let savedProductId = editingProduct?.id;
-    let savedBarcode = barcode;
+    let savedBarcode = editingProduct?.barcode || "";
+    const productBeforeEdit = editingProduct
+      ? {
+          product_code: editingProduct.code,
+          barcode: editingProduct.barcode || null,
+          name: editingProduct.name,
+          category_id: editingProduct.categoryId,
+          price: editingProduct.price,
+          stock: editingProduct.stock,
+          unit: editingProduct.unit,
+          status: editingProduct.status,
+        }
+      : null;
+
+    if (modalMode === "add") {
+      savedBarcode = await createUniqueBarcode();
+      productPayload.barcode = savedBarcode;
+    } else if (barcode !== editingProduct.barcode) {
+      if (!barcode) {
+        throw new Error("สินค้าที่มีอยู่แล้วต้องคงบาร์โค้ดเดิมไว้");
+      }
+
+      if (await findProductDuplicate("barcode", barcode, editingProduct.id)) {
+        throw new Error("บาร์โค้ดนี้มีอยู่ในระบบแล้ว");
+      }
+
+      productPayload.barcode = barcode;
+      savedBarcode = barcode;
+    }
+
+    if (modalMode === "edit") {
+      delete productPayload.stock;
+    }
 
     if (modalMode === "add") {
       const { data, error } = await supabase
@@ -479,6 +609,11 @@ export default function ProductsPage() {
           .from("products")
           .delete()
           .eq("id", savedProductId);
+      } else if (modalMode === "edit" && productBeforeEdit) {
+        await supabase
+          .from("products")
+          .update(productBeforeEdit)
+          .eq("id", savedProductId);
       }
 
       throw costError;
@@ -514,10 +649,62 @@ export default function ProductsPage() {
 
 async function handleDeleteProduct(product) {
   const confirmed = window.confirm(
-    `ต้องการลบสินค้า "${product.name}" (${product.code}) ใช่หรือไม่?`
+    `ต้องการลบสินค้า "${product.name}" (${product.code}) ใช่หรือไม่?\n\nระบบจะตรวจประวัติรับเข้า เคลื่อนไหวสต็อก และการขายก่อนลบ`
   );
 
   if (!confirmed) return;
+
+  const relationChecks = await Promise.all([
+    supabase.from("stock_in").select("id").eq("product_id", product.id).limit(1),
+    supabase
+      .from("stock_movements")
+      .select("id")
+      .eq("product_id", product.id)
+      .limit(1),
+    supabase.from("sale_items").select("id").eq("product_id", product.id).limit(1),
+  ]);
+
+  const relationError = relationChecks.find((result) => result.error)?.error;
+
+  if (relationError) {
+    alert(
+      relationError.message ||
+        "ตรวจสอบประวัติสินค้าไม่สำเร็จ จึงยังไม่ดำเนินการลบ"
+    );
+    return;
+  }
+
+  const hasHistory = relationChecks.some(
+    (result) => (result.data || []).length > 0
+  );
+
+  if (hasHistory) {
+    alert(
+      "ลบสินค้าไม่ได้ เพราะมีประวัติรับเข้า เคลื่อนไหวสต็อก หรือการขายอ้างอิงอยู่ ระบบไม่ลบประวัติเหล่านี้"
+    );
+    return;
+  }
+
+  const { data: existingCost, error: costReadError } = await supabase
+    .from("product_costs")
+    .select("product_id, cost_price, updated_at")
+    .eq("product_id", product.id)
+    .maybeSingle();
+
+  if (costReadError) {
+    alert(costReadError.message || "อ่านข้อมูลต้นทุนสินค้าไม่สำเร็จ");
+    return;
+  }
+
+  const { error: deleteCostError } = await supabase
+    .from("product_costs")
+    .delete()
+    .eq("product_id", product.id);
+
+  if (deleteCostError) {
+    alert(deleteCostError.message || "ลบข้อมูลต้นทุนสินค้าไม่สำเร็จ");
+    return;
+  }
 
   const { error } = await supabase
     .from("products")
@@ -525,6 +712,12 @@ async function handleDeleteProduct(product) {
     .eq("id", product.id);
 
   if (error) {
+    if (existingCost) {
+      await supabase.from("product_costs").upsert(existingCost, {
+        onConflict: "product_id",
+      });
+    }
+
     console.error(error);
     alert(error.message || "ลบสินค้าไม่สำเร็จ");
     return;
@@ -537,6 +730,8 @@ async function handleDeleteProduct(product) {
   async function handleRefresh() {
     setIsRefreshing(true);
     setKeyword("");
+    setCategoryFilter("all");
+    setStatusFilter("all");
     setScannedProduct(null);
 
     await Promise.all([loadProducts(), loadCategories()]);
@@ -580,9 +775,11 @@ async function handleDeleteProduct(product) {
 
           <Menu
             icon={<FaShoppingCart />}
-            text="เบิก/ตัดสต็อก"
+            text="การขาย"
             href="/sales"
           />
+
+          <Menu icon={<FaArrowUp />} text="รับสินค้าเข้า" href="/stock-in" />
 
           <Menu
             icon={<FaHistory />}
@@ -628,9 +825,10 @@ async function handleDeleteProduct(product) {
                 type="button"
                 onClick={() => openBarcodeModal()}
                 className="flex items-center gap-2 rounded-xl bg-slate-800 px-5 py-3 text-white hover:bg-slate-700"
+                aria-label="ดูบาร์โค้ดสินค้า"
               >
                 <FaBarcode />
-                สร้างบาร์โค้ด
+                ดูบาร์โค้ด
               </button>
 
               <button
@@ -663,17 +861,45 @@ async function handleDeleteProduct(product) {
                 className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-11 pr-4 text-slate-800 outline-none focus:border-red-500 focus:bg-white"
               />
             </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row 2xl:w-auto">
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-700 outline-none focus:border-red-500"
+                aria-label="กรองตามหมวดหมู่"
+              >
+                <option value="all">ทุกหมวดหมู่</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-700 outline-none focus:border-red-500"
+                aria-label="กรองตามสถานะสินค้า"
+              >
+                <option value="all">ทุกสถานะ</option>
+                <option value="มีสินค้า">มีสินค้า</option>
+                <option value="ใกล้หมด">ใกล้หมด</option>
+                <option value="หมด">หมด</option>
+              </select>
+            </div>
           </div>
         </section>
 
         <section className="mt-6 rounded-3xl border border-red-100 bg-gradient-to-r from-red-50 to-white p-5">
           <div className="mb-4">
             <h2 className="font-bold text-slate-900">
-              ค้นหาด้วยเครื่องยิงบาร์โค้ด
+              ค้นหาด้วยเครื่องสแกนบาร์โค้ด
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              รองรับเครื่องยิงบาร์โค้ด USB และ Bluetooth
+              รองรับเครื่องสแกนบาร์โค้ดแบบ USB หรือ Bluetooth
             </p>
           </div>
 
@@ -759,7 +985,7 @@ async function handleDeleteProduct(product) {
           </section>
         )}
 
-        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-5">
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-6">
           <StatCard
             title="สินค้าทั้งหมด"
             value={products.length.toLocaleString()}
@@ -782,6 +1008,14 @@ async function handleDeleteProduct(product) {
             detail="สต๊อกน้อยกว่า 10 ชิ้น"
             icon={<FaExclamationTriangle />}
             color="orange"
+          />
+
+          <StatCard
+            title="สินค้าหมด"
+            value={outOfStockCount.toLocaleString()}
+            detail="ต้องตรวจสอบหรือเติมสินค้า"
+            icon={<FaExclamationTriangle />}
+            color="red"
           />
 
           <StatCard
@@ -963,6 +1197,7 @@ async function handleDeleteProduct(product) {
                               onClick={() => openBarcodeModal(item)}
                               className="rounded-xl border border-slate-200 p-3 text-slate-600 hover:bg-slate-100"
                               title="ดูบาร์โค้ด"
+                              aria-label="ดูบาร์โค้ดสินค้า"
                             >
                               <FaBarcode />
                             </button>
@@ -1084,11 +1319,18 @@ async function handleDeleteProduct(product) {
                 >
                   <option value="">-- เลือกหมวดหมู่ --</option>
 
-                  {categories.map((category) => (
+                  {categories
+                    .filter(
+                      (category) =>
+                        category.is_active === true ||
+                        String(category.id) === String(formData.category_id)
+                    )
+                    .map((category) => (
                     <option key={category.id} value={category.id}>
                       {category.name}
+                      {category.is_active !== true ? " (ปิดใช้งาน)" : ""}
                     </option>
-                  ))}
+                    ))}
                 </select>
               </div>
 
@@ -1123,7 +1365,14 @@ async function handleDeleteProduct(product) {
                 value={formData.stock}
                 onChange={handleFormChange}
                 placeholder="0"
+                disabled={modalMode === "edit"}
               />
+
+              {modalMode === "edit" && (
+                <p className="-mt-3 text-xs text-slate-500 md:col-span-2">
+                  สต็อกของสินค้าที่มีอยู่แล้วต้องปรับผ่าน Process 6 เพื่อรักษาประวัติการเคลื่อนไหว
+                </p>
+              )}
 
               <InputField
                 label="หน่วยนับ"
@@ -1204,17 +1453,18 @@ async function handleDeleteProduct(product) {
 
       {showBarcodeModal && selectedProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <div className="relative w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl">
+          <div className="barcode-print-area relative w-full max-w-lg rounded-3xl bg-white p-8 shadow-2xl">
             <button
               type="button"
               onClick={() => setShowBarcodeModal(false)}
               className="absolute right-6 top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
+              aria-label="ปิดตัวอย่างบาร์โค้ด"
             >
               <FaTimes className="text-xl" />
             </button>
 
             <h2 className="text-2xl font-bold text-slate-900">
-              สร้างบาร์โค้ดสินค้า
+              แสดงบาร์โค้ดสินค้า
             </h2>
 
             <p className="mt-1 text-slate-500">
@@ -1249,23 +1499,25 @@ async function handleDeleteProduct(product) {
               </p>
 
               <div className="mt-5 inline-block rounded-xl bg-white p-5 shadow-sm">
-                <Barcode
-                  value={
-                    selectedProduct.barcode ||
-                    selectedProduct.code ||
-                    "NO-CODE"
-                  }
-                  format="CODE128"
-                  width={2}
-                  height={90}
-                  displayValue={true}
-                  fontSize={16}
-                  margin={0}
-                />
+                {selectedProduct.barcode ? (
+                  <Barcode
+                    value={selectedProduct.barcode}
+                    format="CODE128"
+                    width={2}
+                    height={90}
+                    displayValue={true}
+                    fontSize={16}
+                    margin={0}
+                  />
+                ) : (
+                  <p className="px-8 py-8 text-sm font-semibold text-amber-700">
+                    สินค้านี้ยังไม่มีบาร์โค้ด
+                  </p>
+                )}
               </div>
 
               <p className="mt-4 font-mono text-sm text-slate-500">
-                {selectedProduct.barcode || selectedProduct.code}
+                {selectedProduct.barcode || "ไม่มีบาร์โค้ด"}
               </p>
             </div>
 
@@ -1274,6 +1526,7 @@ async function handleDeleteProduct(product) {
                 type="button"
                 onClick={() => setShowBarcodeModal(false)}
                 className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
+                aria-label="ปิดตัวอย่างบาร์โค้ด"
               >
                 ปิด
               </button>
@@ -1281,7 +1534,9 @@ async function handleDeleteProduct(product) {
               <button
                 type="button"
                 onClick={() => window.print()}
+                disabled={!selectedProduct.barcode}
                 className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700"
+                aria-label="พิมพ์บาร์โค้ดสินค้า"
               >
                 <FaPrint />
                 พิมพ์บาร์โค้ด
@@ -1320,6 +1575,7 @@ function InputField({
   type = "text",
   min,
   step,
+  disabled = false,
 }) {
   return (
     <div>
@@ -1335,7 +1591,8 @@ function InputField({
         placeholder={placeholder}
         min={min}
         step={step}
-        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
+        disabled={disabled}
+        className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500 disabled:cursor-not-allowed disabled:bg-slate-100"
       />
     </div>
   );

@@ -21,6 +21,7 @@ export default function AccountHeader() {
 
   const [account, setAccount] = useState({
     name: "กำลังโหลด...",
+    employeeCode: "",
     role: "user",
   });
 
@@ -31,9 +32,9 @@ export default function AccountHeader() {
   const [isLoadingAlerts, setIsLoadingAlerts] = useState(false);
   const [alertError, setAlertError] = useState("");
 
-  const productsPageHref = pathname.startsWith("/user")
-    ? "/user/products"
-    : "/products";
+  const stockInPageHref = pathname.startsWith("/user")
+    ? "/user/stock-in"
+    : "/stock-in";
 
   async function loadAlerts() {
     setIsLoadingAlerts(true);
@@ -81,7 +82,7 @@ export default function AccountHeader() {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("display_name, role")
+        .select("display_name, employee_code, role")
         .eq("id", user.id)
         .maybeSingle();
 
@@ -91,6 +92,7 @@ export default function AccountHeader() {
         name:
           profile?.display_name ||
           (profile?.role === "admin" ? "ผู้ดูแลระบบ" : "พนักงานขาย"),
+        employeeCode: profile?.employee_code || "",
         role: profile?.role || "user",
       });
     }
@@ -122,7 +124,7 @@ export default function AccountHeader() {
     activeTab === "low" ? lowStockProducts : outOfStockProducts;
 
   return (
-    <div className="flex items-center gap-5">
+    <div className="flex min-w-0 items-center justify-end gap-3 sm:gap-5">
       <div className="relative">
         <button
           type="button"
@@ -141,7 +143,7 @@ export default function AccountHeader() {
         </button>
 
         {isAlertOpen && (
-  <div className="fixed right-6 top-24 z-50 w-[760px] max-w-[calc(100vw-3rem)] overflow-hidden rounded-2xl border bg-white shadow-2xl">
+  <div className="fixed right-3 top-20 z-50 w-[760px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border bg-white shadow-2xl sm:right-6 sm:top-24">
     <div className="flex items-center justify-between border-b px-6 py-5">
       <div>
         <p className="text-xl font-bold text-gray-900">
@@ -163,11 +165,11 @@ export default function AccountHeader() {
       </button>
     </div>
 
-    <div className="grid grid-cols-2 gap-4 border-b p-5">
+    <div className="grid grid-cols-2 gap-2 border-b p-3 sm:gap-4 sm:p-5">
       <button
         type="button"
         onClick={() => setActiveTab("low")}
-        className={`min-w-[320px] whitespace-nowrap rounded-xl px-5 py-4 text-base font-semibold transition ${
+        className={`rounded-xl px-3 py-3 text-sm font-semibold transition sm:px-5 sm:py-4 sm:text-base ${
           activeTab === "low"
             ? "bg-orange-500 text-white"
             : "bg-orange-50 text-orange-600 hover:bg-orange-100"
@@ -179,7 +181,7 @@ export default function AccountHeader() {
       <button
         type="button"
         onClick={() => setActiveTab("out")}
-        className={`whitespace-nowrap rounded-xl px-5 py-4 text-base font-semibold transition ${
+        className={`rounded-xl px-3 py-3 text-sm font-semibold transition sm:px-5 sm:py-4 sm:text-base ${
           activeTab === "out"
             ? "bg-red-600 text-white"
             : "bg-red-50 text-red-600 hover:bg-red-100"
@@ -249,11 +251,11 @@ export default function AccountHeader() {
 
     <div className="border-t p-4">
       <Link
-        href={productsPageHref}
+        href={stockInPageHref}
         onClick={() => setIsAlertOpen(false)}
         className="block rounded-xl bg-gray-100 px-5 py-4 text-center text-base font-semibold text-gray-700 hover:bg-gray-200"
       >
-        ไปจัดการสินค้า
+        ไปรับสินค้าเข้า
       </Link>
     </div>
   </div>
@@ -265,8 +267,11 @@ export default function AccountHeader() {
           <FaUser />
         </div>
 
-        <div>
-          <p className="font-bold text-gray-900">{account.name}</p>
+        <div className="min-w-0">
+          <p className="truncate font-bold text-gray-900">{account.name}</p>
+          {account.employeeCode && (
+            <p className="truncate text-xs text-gray-400">{account.employeeCode}</p>
+          )}
           <p className="text-sm text-gray-500">
             {account.role === "admin" ? "Administrator" : "User"}
           </p>

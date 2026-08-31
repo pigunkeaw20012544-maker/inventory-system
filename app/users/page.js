@@ -10,6 +10,7 @@ import { supabase } from "../lib/supabase";
 
 import {
   FaBars,
+  FaArrowUp,
   FaBox,
   FaChartBar,
   FaEdit,
@@ -56,7 +57,7 @@ function normalizeValue(value) {
 }
 
 function isUserActive(user) {
-  return user?.is_active !== false;
+  return user?.is_active === true;
 }
 
 function getRoleLabel(role) {
@@ -105,6 +106,7 @@ export default function UsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState("");
 
   const [errorMessage, setErrorMessage] = useState("");
   const [formError, setFormError] = useState("");
@@ -118,7 +120,7 @@ export default function UsersPage() {
 
       const mappedUsers = (data.users || []).map((user) => ({
         ...user,
-        is_active: user.is_active !== false,
+        is_active: user.is_active === true,
       }));
 
       setUsers(mappedUsers);
@@ -342,7 +344,7 @@ export default function UsersPage() {
     }
 
     const confirmed = window.confirm(
-      `ต้องการลบบัญชี "${user.display_name}" ใช่หรือไม่?\n\nผู้ใช้นี้จะไม่สามารถเข้าสู่ระบบได้อีก`
+      `ต้องการปิดใช้งานบัญชี "${user.display_name}" แทนการลบถาวรใช่หรือไม่?\n\nผู้ใช้นี้จะไม่สามารถเข้าสู่ระบบได้อีก และข้อมูลประวัติจะยังคงอยู่`
     );
 
     if (!confirmed) return;
@@ -353,9 +355,50 @@ export default function UsersPage() {
       });
 
       await loadUsers();
-      alert("ลบบัญชีผู้ใช้งานสำเร็จ");
+      alert("ปิดใช้งานผู้ใช้งานสำเร็จ");
     } catch (error) {
       alert(error.message || "ลบบัญชีไม่สำเร็จ");
+    }
+  }
+
+  async function handleToggleStatus(user) {
+    const isSelf = String(user.id) === String(currentUserId);
+
+    if (isSelf && isUserActive(user)) {
+      alert("ไม่สามารถปิดบัญชีของตนเองได้");
+      return;
+    }
+
+    const nextIsActive = !isUserActive(user);
+    const actionLabel = nextIsActive ? "เปิดใช้งาน" : "ปิดใช้งาน";
+    const confirmed = window.confirm(
+      `ต้องการ${actionLabel}บัญชี "${user.display_name}" ใช่หรือไม่?`
+    );
+
+    if (!confirmed) return;
+
+    setUpdatingStatusId(user.id);
+
+    try {
+      const data = await adminRequest(
+        `/api/admin/users?id=${user.id}&action=toggle-status`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ is_active: nextIsActive }),
+        }
+      );
+
+      setUsers((previous) =>
+        previous.map((item) =>
+          item.id === user.id
+            ? { ...item, is_active: data.is_active === true }
+            : item
+        )
+      );
+    } catch (error) {
+      alert(error.message || `ไม่สามารถ${actionLabel}บัญชีได้`);
+    } finally {
+      setUpdatingStatusId("");
     }
   }
 
@@ -430,6 +473,8 @@ export default function UsersPage() {
             text="การขาย"
             href="/sales"
           />
+
+          <Menu icon={<FaArrowUp />} text="รับสินค้าเข้า" href="/stock-in" />
 
           <Menu
             icon={<FaHistory />}
@@ -511,7 +556,7 @@ export default function UsersPage() {
           </div>
         </section>
 
-        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-4">
+        <section className="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 2xl:grid-cols-5">
           <SummaryCard
             title="ผู้ใช้งานทั้งหมด"
             value={`${users.length} คน`}
@@ -539,9 +584,17 @@ export default function UsersPage() {
           <SummaryCard
             title="สิทธิ์ Admin"
             value={`${adminCount} คน`}
-            detail={`พนักงานทั่วไป ${userCount} คน`}
+            detail="ผู้ดูแลระบบ"
             icon={<FaShieldAlt />}
             color="red"
+          />
+
+          <SummaryCard
+            title="สิทธิ์ User"
+            value={`${userCount} คน`}
+            detail="พนักงานทั่วไป"
+            icon={<FaUsers />}
+            color="blue"
           />
         </section>
 
@@ -622,6 +675,9 @@ export default function UsersPage() {
                     สถานะ
                   </th>
                   <th className="px-5 py-4 text-left font-semibold">
+                    ออนไลน์ล่าสุด
+                  </th>
+                  <th className="px-5 py-4 text-left font-semibold">
                     วันที่เพิ่ม
                   </th>
                   <th className="px-5 py-4 text-center font-semibold">
@@ -634,7 +690,7 @@ export default function UsersPage() {
                 {isLoading && (
                   <tr>
                     <td
-                      colSpan="10"
+                      colSpan="11"
                       className="px-6 py-16 text-center text-slate-500"
                     >
                       กำลังโหลดข้อมูลผู้ใช้งาน...
@@ -692,6 +748,10 @@ export default function UsersPage() {
                           <StatusBadge isActive={isUserActive(user)} />
                         </td>
 
+                        <td className="px-5 py-4">
+                          <OnlineBadge isOnline={user.is_online} />
+                        </td>
+
                         <td className="px-5 py-4 text-slate-500">
                           {formatDate(user.created_at)}
                         </td>
@@ -700,9 +760,43 @@ export default function UsersPage() {
                           <div className="flex justify-center gap-2">
                             <button
                               type="button"
+                              onClick={() => handleToggleStatus(user)}
+                              disabled={
+                                isSelf || updatingStatusId === user.id
+                              }
+                              className={`rounded-xl border p-3 ${
+                                isSelf || updatingStatusId === user.id
+                                  ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                                  : isUserActive(user)
+                                    ? "border-orange-200 bg-orange-50 text-orange-600 hover:bg-orange-100"
+                                    : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                              }`}
+                              title={
+                                isSelf
+                                  ? "ไม่สามารถเปลี่ยนสถานะบัญชีตนเองได้"
+                                  : isUserActive(user)
+                                    ? "ปิดใช้งานผู้ใช้งาน"
+                                    : "เปิดใช้งานผู้ใช้งาน"
+                              }
+                              aria-label={
+                                isUserActive(user)
+                                  ? "ปิดใช้งานผู้ใช้งาน"
+                                  : "เปิดใช้งานผู้ใช้งาน"
+                              }
+                            >
+                              {isUserActive(user) ? (
+                                <FaUserSlash />
+                              ) : (
+                                <FaUserCheck />
+                              )}
+                            </button>
+
+                            <button
+                              type="button"
                               onClick={() => openEditModal(user)}
                               className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-600 hover:bg-blue-100"
                               title="แก้ไขผู้ใช้งาน"
+                              aria-label="แก้ไขผู้ใช้งาน"
                             >
                               <FaEdit />
                             </button>
@@ -718,9 +812,10 @@ export default function UsersPage() {
                               }`}
                               title={
                                 isSelf
-                                  ? "ไม่สามารถลบบัญชีของตนเองได้"
-                                  : "ลบผู้ใช้งาน"
+                                  ? "ไม่สามารถปิดใช้งานบัญชีของตนเองได้"
+                                  : "ปิดใช้งานแทนการลบผู้ใช้งาน"
                               }
+                              aria-label="ปิดใช้งานแทนการลบผู้ใช้งาน"
                             >
                               <FaTrash />
                             </button>
@@ -733,7 +828,7 @@ export default function UsersPage() {
                 {!isLoading && filteredUsers.length === 0 && (
                   <tr>
                     <td
-                      colSpan="10"
+                      colSpan="11"
                       className="px-6 py-16 text-center text-slate-500"
                     >
                       ไม่พบผู้ใช้งานตามเงื่อนไขที่ค้นหา
@@ -878,6 +973,7 @@ export default function UsersPage() {
               <button
                 type="button"
                 onClick={closeModal}
+                disabled={isSaving}
                 className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700 hover:bg-slate-50"
               >
                 ยกเลิก
@@ -962,6 +1058,23 @@ function StatusBadge({ isActive }) {
   );
 }
 
+function OnlineBadge({ isOnline }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-2 text-xs font-semibold ${
+        isOnline ? "text-emerald-700" : "text-slate-400"
+      }`}
+    >
+      <span
+        className={`h-2.5 w-2.5 rounded-full ${
+          isOnline ? "bg-emerald-500" : "bg-slate-300"
+        }`}
+      />
+      {isOnline ? "ออนไลน์" : "ออฟไลน์"}
+    </span>
+  );
+}
+
 function Field({
   label,
   name,
@@ -972,11 +1085,15 @@ function Field({
 }) {
   return (
     <div>
-      <label className="mb-2 block text-sm font-medium text-slate-700">
-        {label}
+      <label
+        htmlFor={name}
+        className="mb-2 block text-sm font-medium text-slate-700"
+      >
+        <span>{label}</span>
       </label>
 
       <input
+        id={name}
         type={type}
         name={name}
         value={value}

@@ -9,11 +9,14 @@ import BrandLogo from "../../components/BrandLogo";
 import LogoutButton from "../../components/LogoutButton";
 import { supabase } from "../../lib/supabase";
 
+
 import {
   FaBars,
+  FaArrowUp,
   FaBarcode,
   FaBox,
   FaChartBar,
+  FaPrint,
   FaHome,
   FaMinus,
   FaPlus,
@@ -106,6 +109,29 @@ function getLineTotal(item) {
   return toNumber(item.quantity) * toNumber(item.price);
 }
 
+function getStatusFromStock(stock) {
+  const quantity = toNumber(stock);
+  if (quantity <= 0) return "หมด";
+  if (quantity < 10) return "ใกล้หมด";
+  return "มีสินค้า";
+}
+
+async function getAvailableSaleNumber() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const candidate = createStockOutNumber();
+    const { data, error } = await supabase
+      .from("sales")
+      .select("id")
+      .eq("sale_number", candidate)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) return candidate;
+  }
+
+  throw new Error("ไม่สามารถสร้างเลขที่บิลที่ไม่ซ้ำได้ กรุณาลองใหม่");
+}
+
 export default function UserSalesPage() {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
@@ -116,12 +142,23 @@ export default function UserSalesPage() {
     createStockOutNumber()
   );
   const [note, setNote] = useState("");
+  const [discount, setDiscount] = useState("0");
+  const [sellerName, setSellerName] = useState("");
+  const [sellerCode, setSellerCode] = useState("");
+  const [sellerId, setSellerId] = useState("");
+  const [receipt, setReceipt] = useState(null);
 
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  const subtotalAmount = useMemo(() => {
+    return cart.reduce((sum, item) => sum + getLineTotal(item), 0);
+  }, [cart]);
+  const discountAmount = Math.max(0, toNumber(discount));
+  const totalAmount = Math.max(0, subtotalAmount - discountAmount);
 
   async function loadProducts() {
     setIsLoadingProducts(true);
@@ -156,6 +193,7 @@ export default function UserSalesPage() {
         price: toNumber(product.price),
         stock: toNumber(product.stock),
         unit: product.unit || "ชิ้น",
+          status: getStatusFromStock(product.stock),
       }));
 
       setProducts(mappedProducts);
@@ -169,6 +207,33 @@ export default function UserSalesPage() {
   }
 
   useEffect(() => {
+    async function loadSeller() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setErrorMessage("ไม่พบผู้ขายปัจจุบัน กรุณาเข้าสู่ระบบใหม่");
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("display_name, employee_code, role, is_active")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error || !profile || profile.role !== "user" || profile.is_active !== true) {
+        setErrorMessage("ไม่พบสิทธิ์ผู้ขายที่ใช้งานได้");
+        return;
+      }
+
+      setSellerId(user.id);
+      setSellerName(profile.display_name || "");
+      setSellerCode(profile.employee_code || "");
+    }
+
+    void loadSeller();
     void loadProducts();
 
     const channel = supabase
@@ -208,10 +273,6 @@ export default function UserSalesPage() {
 
   const totalQuantity = useMemo(() => {
     return cart.reduce((sum, item) => sum + toNumber(item.quantity), 0);
-  }, [cart]);
-
-  const totalAmount = useMemo(() => {
-    return cart.reduce((sum, item) => sum + getLineTotal(item), 0);
   }, [cart]);
 
   function addProduct(product) {
@@ -373,6 +434,7 @@ export default function UserSalesPage() {
 
     setCart([]);
     setNote("");
+    setDiscount("0");
   }
 
   function cancelStockOut() {
@@ -386,6 +448,8 @@ export default function UserSalesPage() {
     setCart([]);
     setProductSearch("");
     setNote("");
+    setDiscount("0");
+    setReceipt(null);
     setStockOutNumber(createStockOutNumber());
   }
 
@@ -405,29 +469,66 @@ export default function UserSalesPage() {
       return;
     }
 
-    const hasOverStock = cart.some(
-      (item) => toNumber(item.quantity) > toNumber(item.stock)
+    if (discount.trim() !== "" && !Number.isFinite(Number(discount))) {
+      alert("ส่วนลดต้องเป็นตัวเลข");
+      return;
+    }
+
+    if (discountAmount < 0 || discountAmount > subtotalAmount) {
+      alert("ส่วนลดต้องไม่ติดลบและต้องไม่เกินยอดรวมสินค้า");
+      return;
+    }
+
+    if (!sellerId || !sellerName.trim()) {
+      alert("ไม่พบข้อมูลผู้ขายปัจจุบัน ไม่สามารถบันทึกการขายได้");
+      return;
+    }
+
+    const { data: currentProducts, error: currentProductsError } = await supabase
+      .from("products")
+      .select("id, stock, price")
+      .in("id", cart.map((item) => item.productId));
+
+    if (currentProductsError) {
+      alert(currentProductsError.message || "ตรวจสอบสต็อกล่าสุดไม่สำเร็จ");
+      return;
+    }
+
+    const currentProductMap = new Map(
+      (currentProducts || []).map((product) => [String(product.id), product])
     );
+
+    const hasOverStock = cart.some((item) => {
+      const currentProduct = currentProductMap.get(String(item.productId));
+      return (
+        !currentProduct ||
+        !Number.isInteger(toNumber(item.quantity)) ||
+        toNumber(item.quantity) <= 0 ||
+        toNumber(item.quantity) > toNumber(currentProduct.stock) ||
+        toNumber(currentProduct.price) < 0
+      );
+    });
 
     if (hasOverStock) {
       alert("มีสินค้าที่ระบุจำนวนเกินสต็อก กรุณาตรวจสอบอีกครั้ง");
       return;
     }
 
-    const currentStockOutNumber = stockOutNumber;
-
     setIsSaving(true);
+    let saleCommitted = false;
 
     try {
+      const currentStockOutNumber = await getAvailableSaleNumber();
+      setStockOutNumber(currentStockOutNumber);
       const { error } = await supabase.rpc("create_user_sale", {
         p_sale_number: currentStockOutNumber,
         p_sale_date: stockOutDate,
-        p_note: note.trim() || "ตัดสต็อกสินค้า",
-        p_discount: 0,
+        p_note: note.trim() || "การขายสินค้า",
+        p_discount: discountAmount,
         p_items: cart.map((item) => ({
           product_id: Number(item.productId),
           quantity: toNumber(item.quantity),
-          price: toNumber(item.price),
+          price: toNumber(currentProductMap.get(String(item.productId)).price),
           discount: 0,
         })),
       });
@@ -436,19 +537,55 @@ export default function UserSalesPage() {
         throw error;
       }
 
+      saleCommitted = true;
+
+      const { data: savedSale, error: saleReadError } = await supabase
+        .from("sales")
+        .select("id, sale_number, sale_date, seller_name, note, total_amount, created_at")
+        .eq("sale_number", currentStockOutNumber)
+        .maybeSingle();
+
+      if (saleReadError || !savedSale) {
+        throw saleReadError || new Error("บันทึกสำเร็จแต่โหลดใบเสร็จไม่สำเร็จ");
+      }
+
+      const { data: savedItems, error: itemsReadError } = await supabase
+        .from("sale_items")
+        .select("sale_id, product_code, product_name, quantity, price, subtotal")
+        .eq("sale_id", savedSale.id);
+
+      if (itemsReadError) throw itemsReadError;
+
+      setReceipt({
+        sale: savedSale,
+        items: savedItems || [],
+        subtotal: subtotalAmount,
+        discount: discountAmount,
+      });
+
       await loadProducts();
 
       setCart([]);
       setProductSearch("");
       setNote("");
+      setDiscount("0");
       setStockOutNumber(createStockOutNumber());
 
-      alert(
-        `บันทึกการตัดสต็อกสำเร็จ\nเลขที่รายการ: ${currentStockOutNumber}`
-      );
+      alert(`บันทึกการขายสำเร็จ\nเลขที่บิล: ${currentStockOutNumber}`);
     } catch (error) {
       console.error(error);
-      alert(error.message || "บันทึกการตัดสต็อกไม่สำเร็จ");
+      if (saleCommitted) {
+        setCart([]);
+        setProductSearch("");
+        setNote("");
+        setDiscount("0");
+        setStockOutNumber(createStockOutNumber());
+      }
+      alert(
+        saleCommitted
+          ? `บันทึกการขายแล้ว แต่โหลดใบเสร็จไม่สำเร็จ: ${error.message || "ตรวจสอบ RLS ของ sales และ sale_items"}`
+          : error.message || "บันทึกการขายไม่สำเร็จ"
+      );
     } finally {
       setIsSaving(false);
     }
@@ -456,6 +593,21 @@ export default function UserSalesPage() {
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-slate-50">
+      <style jsx global>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .user-receipt-print-area,
+          .user-receipt-print-area * { visibility: visible !important; }
+          .user-receipt-print-area {
+            position: absolute !important;
+            inset: 0 auto auto 0 !important;
+            width: 100% !important;
+            border: 0 !important;
+            box-shadow: none !important;
+          }
+          .user-receipt-actions { display: none !important; }
+        }
+      `}</style>
       {/* Hamburger Button - Mobile Only */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -505,10 +657,13 @@ export default function UserSalesPage() {
 
           <Menu icon={<FaBox />} text="สินค้า" href="/user/products" onNavigate={() => setSidebarOpen(false)} />
 
+          <Menu icon={<FaBarcode />} text="สแกนบาร์โค้ด" href="/user/barcode" onNavigate={() => setSidebarOpen(false)} />
+          <Menu icon={<FaArrowUp />} text="รับสินค้าเข้า" href="/user/stock-in" onNavigate={() => setSidebarOpen(false)} />
+
           <Menu
             active
             icon={<FaShoppingCart />}
-            text="เบิก/ตัดสต็อก"
+            text="ขายสินค้า"
             href="/user/sales"
             onNavigate={() => setSidebarOpen(false)}
           />
@@ -531,7 +686,7 @@ export default function UserSalesPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-4xl font-bold text-slate-900">
-                เบิก/ตัดสต็อกสินค้า
+                ขายสินค้า
               </h1>
 
               <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-medium text-blue-600">
@@ -540,7 +695,7 @@ export default function UserSalesPage() {
             </div>
 
             <p className="mt-2 text-slate-500">
-              เลือกสินค้าและระบุจำนวนเพื่อตัดออกจากสต็อก
+              ค้นหา/สแกนสินค้า ระบุจำนวน และบันทึกการขาย
             </p>
           </div>
 
@@ -558,7 +713,7 @@ export default function UserSalesPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">
-                  ข้อมูลการตัดสต็อก
+                  ข้อมูลการขาย
                 </h2>
 
                 <p className="mt-1 text-slate-500">
@@ -580,7 +735,7 @@ export default function UserSalesPage() {
             <div className="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2">
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                  วันที่ตัดสต็อก
+                  วันที่ขาย
                 </label>
 
                 <input
@@ -594,7 +749,7 @@ export default function UserSalesPage() {
 
               <div>
                 <label className="mb-2 block text-sm font-medium text-slate-700">
-                  เลขที่รายการ
+                  เลขที่บิล
                 </label>
 
                 <input
@@ -602,6 +757,13 @@ export default function UserSalesPage() {
                   readOnly
                   className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500"
                 />
+              </div>
+
+              <div>
+                <label className="mb-2 block text-sm font-medium text-slate-700">
+                  ผู้ขาย
+                </label>
+                <input value={`${sellerName}${sellerCode ? ` (${sellerCode})` : ""}`} readOnly className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 text-slate-500" />
               </div>
             </div>
 
@@ -636,7 +798,7 @@ export default function UserSalesPage() {
               </div>
 
               <p className="mt-3 text-sm text-slate-500">
-                ใช้เครื่องสแกนบาร์โค้ดยิงที่ช่องด้านบน แล้วกด Enter ได้ทันที
+                เชื่อมต่อเครื่องสแกน แล้วสแกนบาร์โค้ดที่ช่องด้านบน จากนั้นกด Enter ได้ทันที
               </p>
             </div>
 
@@ -721,7 +883,7 @@ export default function UserSalesPage() {
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">
-                  รายการตัดสต็อก
+                  รายการขาย
                 </h2>
 
                 <p className="mt-1 text-slate-500">
@@ -848,7 +1010,7 @@ export default function UserSalesPage() {
                         colSpan="5"
                         className="py-16 text-center text-slate-500"
                       >
-                        ยังไม่มีสินค้าในรายการตัดสต็อก
+                        ยังไม่มีสินค้าในบิล
                       </td>
                     </tr>
                   )}
@@ -864,9 +1026,9 @@ export default function UserSalesPage() {
               </div>
 
               <div className="mt-4 flex justify-between border-t border-red-200 pt-4 text-2xl font-bold text-red-600">
-                <span>มูลค่ารวม</span>
+                <span>Subtotal</span>
 
-                <span>฿ {formatMoney(totalAmount)}</span>
+                <span>฿ {formatMoney(subtotalAmount)}</span>
               </div>
             </div>
 
@@ -879,10 +1041,34 @@ export default function UserSalesPage() {
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 disabled={isSaving}
-                placeholder="เพิ่มเหตุผลหรือรายละเอียดการตัดสต็อก (ไม่บังคับ)"
+                placeholder="เพิ่มหมายเหตุการขาย (ไม่บังคับ)"
                 rows="3"
                 className="w-full resize-none rounded-xl border border-slate-200 p-4 text-slate-800 outline-none focus:border-red-500"
               />
+            </div>
+
+            <div className="mt-5">
+              <label className="mb-2 block text-sm font-medium text-slate-700">
+                ส่วนลดทั้งบิล
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={discount}
+                onChange={(event) => setDiscount(event.target.value)}
+                disabled={isSaving}
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-slate-800 outline-none focus:border-red-500"
+              />
+              {discountAmount > subtotalAmount && (
+                <p className="mt-2 text-sm text-red-600">ส่วนลดต้องไม่เกิน Subtotal</p>
+              )}
+            </div>
+
+            <div className="mt-5 space-y-2 rounded-2xl border border-slate-200 p-4 text-slate-700">
+              <div className="flex justify-between"><span>Subtotal</span><b>฿ {formatMoney(subtotalAmount)}</b></div>
+              <div className="flex justify-between"><span>ส่วนลด</span><b>- ฿ {formatMoney(discountAmount)}</b></div>
+              <div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-red-600"><span>ยอดสุทธิ</span><b>฿ {formatMoney(totalAmount)}</b></div>
             </div>
 
             <div className="mt-6 grid grid-cols-2 gap-4">
@@ -902,11 +1088,35 @@ export default function UserSalesPage() {
                 className="flex items-center justify-center gap-3 rounded-xl bg-red-600 px-6 py-4 text-white hover:bg-red-700 disabled:bg-red-300"
               >
                 <FaSave />
-                {isSaving ? "กำลังบันทึก..." : "บันทึกตัดสต็อก"}
+                {isSaving ? "กำลังบันทึก..." : "บันทึกการขาย"}
               </button>
             </div>
           </section>
         </section>
+
+        {receipt && (
+          <section className="user-receipt-print-area mt-8 rounded-3xl border border-emerald-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-emerald-700">บันทึกการขายสำเร็จ</p>
+                <h2 className="mt-1 text-2xl font-bold text-slate-900">ใบเสร็จการขาย</h2>
+                <p className="mt-2 text-sm text-slate-500">เลขที่บิล {receipt.sale.sale_number}</p>
+                <p className="text-sm text-slate-500">วันที่ {receipt.sale.sale_date} · ผู้ขาย {receipt.sale.seller_name || sellerName} {sellerCode ? `(${sellerCode})` : ""}</p>
+              </div>
+              <div className="user-receipt-actions flex gap-3">
+                <button type="button" onClick={() => window.print()} className="flex items-center gap-2 rounded-xl bg-red-600 px-5 py-3 text-white hover:bg-red-700"><FaPrint /> พิมพ์ใบเสร็จ</button>
+                <button type="button" onClick={() => setReceipt(null)} className="rounded-xl border border-slate-200 px-5 py-3 text-slate-700">ปิด</button>
+              </div>
+            </div>
+            <div className="mt-5 overflow-x-auto">
+              <table className="w-full min-w-[600px] text-sm">
+                <thead><tr className="border-b border-slate-200 text-left text-slate-500"><th className="px-3 py-3">สินค้า</th><th className="px-3 py-3 text-center">จำนวน</th><th className="px-3 py-3 text-right">ราคา</th><th className="px-3 py-3 text-right">ยอดย่อย</th></tr></thead>
+                <tbody>{receipt.items.map((item, index) => <tr key={`${item.sale_id}-${item.product_code}-${index}`} className="border-b border-slate-100"><td className="px-3 py-3 font-semibold text-slate-900">{item.product_name || item.product_code}</td><td className="px-3 py-3 text-center">{item.quantity}</td><td className="px-3 py-3 text-right">฿ {formatMoney(item.price)}</td><td className="px-3 py-3 text-right">฿ {formatMoney(item.subtotal)}</td></tr>)}</tbody>
+              </table>
+            </div>
+            <div className="mt-5 ml-auto max-w-sm space-y-2 text-sm"><div className="flex justify-between"><span>Subtotal</span><b>฿ {formatMoney(receipt.subtotal)}</b></div><div className="flex justify-between"><span>ส่วนลด</span><b>- ฿ {formatMoney(receipt.discount)}</b></div><div className="flex justify-between border-t border-slate-200 pt-3 text-xl font-bold text-red-600"><span>ยอดสุทธิ</span><b>฿ {formatMoney(receipt.sale.total_amount)}</b></div></div>
+          </section>
+        )}
       </main>
     </div>
   );

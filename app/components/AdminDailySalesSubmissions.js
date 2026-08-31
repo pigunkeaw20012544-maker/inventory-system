@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FaBell,
   FaCalendarAlt,
@@ -53,9 +53,11 @@ export default function AdminDailySalesSubmissions() {
   const [submissions, setSubmissions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [markingId, setMarkingId] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  async function loadSubmissions() {
+  const loadSubmissions = useCallback(async () => {
     setIsLoading(true);
+    setErrorMessage("");
 
     const { data, error } = await supabase
       .from("daily_sales_submissions")
@@ -68,7 +70,8 @@ export default function AdminDailySalesSubmissions() {
         item_quantity,
         total_amount,
         submitted_at,
-        seen_at
+        seen_at,
+        seen_by
       `)
       .eq("report_date", selectedDate)
       .order("submitted_at", { ascending: false });
@@ -76,12 +79,36 @@ export default function AdminDailySalesSubmissions() {
     if (error) {
       console.error(error);
       setSubmissions([]);
-    } else {
-      setSubmissions(data || []);
+      setErrorMessage(error.message || "ไม่สามารถโหลดรายการยอดขายประจำวันได้");
+      setIsLoading(false);
+      return;
     }
 
+    const rows = data || [];
+    const seenByIds = [...new Set(rows.filter((row) => row.seen_by).map((row) => row.seen_by))];
+
+    let adminNameById = {};
+
+    if (seenByIds.length > 0) {
+      const { data: admins } = await supabase
+        .from("profiles")
+        .select("id, display_name")
+        .in("id", seenByIds);
+
+      adminNameById = Object.fromEntries(
+        (admins || []).map((admin) => [admin.id, admin.display_name])
+      );
+    }
+
+    setSubmissions(
+      rows.map((row) => ({
+        ...row,
+        seen_by_name: row.seen_by ? adminNameById[row.seen_by] || "ผู้ดูแลระบบ" : null,
+      }))
+    );
+
     setIsLoading(false);
-  }
+  }, [selectedDate]);
 
   useEffect(() => {
     void loadSubmissions();
@@ -104,7 +131,7 @@ export default function AdminDailySalesSubmissions() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [selectedDate]);
+  }, [loadSubmissions, selectedDate]);
 
   const unreadCount = useMemo(() => {
     return submissions.filter((item) => !item.seen_at).length;
@@ -124,7 +151,7 @@ export default function AdminDailySalesSubmissions() {
 
     if (error) {
       console.error(error);
-      alert(error.message || "ไม่สามารถรับทราบรายการตัดสต็อกได้");
+      alert(error.message || "ไม่สามารถบันทึกการรับทราบรายการได้");
       return;
     }
 
@@ -137,6 +164,11 @@ export default function AdminDailySalesSubmissions() {
 
   return (
     <section className="mb-6 rounded-3xl border bg-white p-6 shadow-sm">
+      {errorMessage && (
+        <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+          {errorMessage}
+        </div>
+      )}
       <div className="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-3">
           <div className="relative flex h-12 w-12 items-center justify-center rounded-full bg-red-100 text-red-600">
@@ -151,11 +183,11 @@ export default function AdminDailySalesSubmissions() {
 
           <div>
             <h2 className="text-2xl font-bold text-gray-900">
-              รายการตัดสต็อกจากพนักงาน
+              ยอดขายประจำวันที่พนักงานส่ง
             </h2>
 
             <p className="mt-1 text-gray-500">
-              แสดงรายการที่พนักงานส่งในวันที่ {formatDate(selectedDate)}
+              แสดงยอดขายประจำวันที่ {formatDate(selectedDate)}
             </p>
           </div>
         </div>
@@ -238,7 +270,7 @@ export default function AdminDailySalesSubmissions() {
                     {item.seen_at ? (
                       <span className="inline-flex items-center gap-2 rounded-full bg-green-100 px-3 py-2 text-sm text-green-700">
                         <FaCheckCircle />
-                        รับทราบแล้ว
+                        รับทราบแล้ว{item.seen_by_name ? ` (${item.seen_by_name})` : ""}
                       </span>
                     ) : (
                       <button
@@ -264,7 +296,7 @@ export default function AdminDailySalesSubmissions() {
                 >
                   {isLoading
                     ? "กำลังโหลดข้อมูล..."
-                    : `ไม่มีพนักงานส่งรายการตัดสต็อกในวันที่ ${formatDate(
+                    : `ไม่มีพนักงานส่งยอดขายในวันที่ ${formatDate(
                         selectedDate
                       )}`}
                 </td>

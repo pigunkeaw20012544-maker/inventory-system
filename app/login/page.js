@@ -20,11 +20,11 @@ const [isLoading, setIsLoading] = useState(false);
 async function handleLogin(event) {
 event.preventDefault();
 
-
 const inputEmail = email.trim();
-const inputPassword = password.trim();
+const inputPassword = password;
+const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inputEmail);
 
-if (!inputEmail || !inputPassword) {
+if (!inputEmail || !isValidEmail || !inputPassword.trim()) {
   setErrorMessage("กรุณากรอกอีเมลและรหัสผ่าน");
   return;
 }
@@ -45,19 +45,37 @@ if (error || !data.user) {
 
 const { data: profile, error: profileError } = await supabase
   .from("profiles")
-  .select("role")
+  .select("role, is_active")
   .eq("id", data.user.id)
-  .single();
+  .maybeSingle();
 
-setIsLoading(false);
-
-if (profileError) {
-  console.error(profileError);
-  setErrorMessage("ไม่พบข้อมูลสิทธิ์ผู้ใช้งาน กรุณาตรวจสอบตาราง profiles");
+if (
+  profileError ||
+  !profile ||
+  profile.is_active !== true
+) {
+  await supabase.auth.signOut({ scope: "local" });
+  setIsLoading(false);
+  setErrorMessage(
+    profile?.is_active === false
+      ? "บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ"
+      : "ไม่พบข้อมูลสิทธิ์ผู้ใช้งาน กรุณาติดต่อผู้ดูแลระบบ"
+  );
   return;
 }
 
-if (profile.role === "admin") {
+const role = String(profile.role || "").toLowerCase();
+
+if (role !== "admin" && role !== "user") {
+  await supabase.auth.signOut({ scope: "local" });
+  setIsLoading(false);
+  setErrorMessage("บัญชีนี้ไม่มีสิทธิ์เข้าใช้งานระบบ");
+  return;
+}
+
+setIsLoading(false);
+
+if (role === "admin") {
   router.replace("/dashboard");
   return;
 }

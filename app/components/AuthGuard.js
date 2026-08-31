@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase";
 
 const CHECK_INTERVAL_MS = 10000;
+const LAST_SEEN_UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function AuthGuard({ children }) {
   const pathname = usePathname();
@@ -14,6 +15,7 @@ export default function AuthGuard({ children }) {
 
   const checkingRef = useRef(false);
   const disabledMessageShownRef = useRef(false);
+  const lastSeenUpdatedAtRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
@@ -66,7 +68,14 @@ export default function AuthGuard({ children }) {
           return;
         }
 
-        if (profileError || !profile || profile.is_active === false) {
+        const role = String(profile?.role || "").toLowerCase();
+
+        if (
+          profileError ||
+          !profile ||
+          profile.is_active !== true ||
+          (role !== "admin" && role !== "user")
+        ) {
           await supabase.auth.signOut({ scope: "local" });
 
           if (mounted) {
@@ -88,10 +97,16 @@ export default function AuthGuard({ children }) {
           return;
         }
 
-        const role =
-          String(profile.role || "").toLowerCase() === "admin"
-            ? "admin"
-            : "user";
+        if (
+          Date.now() - lastSeenUpdatedAtRef.current >=
+          LAST_SEEN_UPDATE_INTERVAL_MS
+        ) {
+          lastSeenUpdatedAtRef.current = Date.now();
+          await supabase
+            .from("profiles")
+            .update({ last_seen_at: new Date().toISOString() })
+            .eq("id", user.id);
+        }
 
         if (isLoginPage) {
           keepLoading = true;
@@ -114,8 +129,12 @@ export default function AuthGuard({ children }) {
           router.replace("/dashboard");
           return;
         }
-      } catch (error) {
-        console.error("ตรวจสอบสิทธิ์ไม่สำเร็จ:", error);
+      } catch {
+        keepLoading = true;
+
+        if (mounted && pathname !== "/login") {
+          router.replace("/login");
+        }
       } finally {
         checkingRef.current = false;
 

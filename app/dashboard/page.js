@@ -10,6 +10,7 @@ import { supabase } from "../lib/supabase";
 
 import {
   FaArrowRight,
+  FaArrowUp,
   FaBars,
   FaBell,
   FaBox,
@@ -488,6 +489,13 @@ export default function DashboardPage() {
             icon={<FaShoppingCart />}
             text="เบิก/ตัดสต็อก"
             href="/sales"
+            onNavigate={() => setSidebarOpen(false)}
+          />
+
+          <Menu
+            icon={<FaArrowUp />}
+            text="รับสินค้าเข้า"
+            href="/stock-in"
             onNavigate={() => setSidebarOpen(false)}
           />
 

@@ -18,11 +18,12 @@ export default function BarcodeScanBox({
   disabled = false,
 }) {
   const inputRef = useRef(null);
+  const lastScanRef = useRef({ value: "", timestamp: 0 });
 
   const [scanValue, setScanValue] = useState("");
   const [scanStatus, setScanStatus] = useState({
     type: "idle",
-    text: "พร้อมยิงบาร์โค้ดสินค้า",
+    text: "พร้อมสแกนบาร์โค้ดสินค้า",
   });
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function BarcodeScanBox({
   function setScanErrorStatus() {
     setScanStatus({
       type: "idle",
-      text: "พร้อมยิงบาร์โค้ดสินค้า",
+      text: "พร้อมสแกนบาร์โค้ดสินค้า",
     });
   }
 
@@ -67,28 +68,48 @@ export default function BarcodeScanBox({
     const rawCode = String(event.currentTarget.value ?? "").trim();
     const scannedCode = normalizeScanValue(rawCode);
 
+    if (
+      scannedCode &&
+      scannedCode === lastScanRef.current.value &&
+      Date.now() - lastScanRef.current.timestamp < 500
+    ) {
+      return;
+    }
+
+    lastScanRef.current = { value: scannedCode, timestamp: Date.now() };
+
     if (!scannedCode) {
       setScanStatus({
         type: "error",
-        text: "กรุณายิงบาร์โค้ดหรือกรอกรหัสก่อน",
+        text: "กรุณาสแกนบาร์โค้ดหรือกรอกรหัสก่อน",
       });
 
       focusScanner();
       return;
     }
 
-    const matchedProduct = products.find((product) =>
-      [
-        product.barcode,
-        product.code,
-        product.product_code,
-        product.id,
-      ].some(
+    const matchedProducts = products.filter((product) =>
+      [product.barcode, product.code, product.product_code, product.id].some(
         (value) => normalizeScanValue(value) === scannedCode
       )
     );
 
     setScanValue("");
+
+    const barcodeMatches = matchedProducts.filter(
+      (product) => normalizeScanValue(product.barcode) === scannedCode
+    );
+
+    if (barcodeMatches.length > 1) {
+      setScanStatus({
+        type: "error",
+        text: "พบ barcode ซ้ำในฐานข้อมูล กรุณาตรวจสอบข้อมูลสินค้า",
+      });
+      focusScanner();
+      return;
+    }
+
+    const matchedProduct = matchedProducts[0];
 
     if (!matchedProduct) {
       setScanStatus({
@@ -149,7 +170,7 @@ export default function BarcodeScanBox({
         <div className="flex-1">
           <label className="mb-2 flex items-center gap-2 text-base font-bold text-gray-800">
             <FaBarcode className="text-red-600" />
-            ช่องยิงบาร์โค้ดสินค้า
+            ช่องสแกนบาร์โค้ดสินค้า
           </label>
 
           <div className="relative">
@@ -164,7 +185,7 @@ export default function BarcodeScanBox({
               autoComplete="off"
               autoCorrect="off"
               spellCheck="false"
-              placeholder="คลิกช่องนี้ แล้วใช้เครื่องยิงบาร์โค้ด"
+              placeholder="เชื่อมต่อเครื่องสแกน แล้วสแกนบาร์โค้ดสินค้า"
               className="w-full rounded-xl border border-red-300 bg-white py-4 pl-12 pr-4 text-lg text-gray-800 outline-none focus:border-red-500 disabled:bg-gray-100"
             />
           </div>
@@ -176,7 +197,7 @@ export default function BarcodeScanBox({
           disabled={disabled}
           className="rounded-xl border border-red-300 bg-white px-7 py-4 font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
         >
-          พร้อมยิง
+          พร้อมสแกน
         </button>
       </div>
 
@@ -201,7 +222,7 @@ export default function BarcodeScanBox({
       </div>
 
       <p className="mt-3 text-sm text-gray-500">
-        เสียบเครื่องยิงบาร์โค้ด USB แล้วกดพร้อมยิง จากนั้นยิงรหัสได้ทันที
+        รองรับเครื่องสแกนบาร์โค้ดแบบ USB หรือ Bluetooth และรับข้อมูลด้วยปุ่ม Enter หรือ Tab หลังการสแกน
       </p>
     </div>
   );

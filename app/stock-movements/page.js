@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import AccountHeader from "../components/AccountHeader";
@@ -128,15 +128,15 @@ function getMovementInfo(type) {
       color: "bg-blue-100 text-blue-700",
     },
     stock_in: {
-      label: "เพิ่มสต็อก",
+      label: "รับสินค้าเข้า",
       color: "bg-emerald-100 text-emerald-700",
     },
     sale_out: {
-      label: "เบิก/ตัดสต็อก",
+      label: "ขายสินค้า",
       color: "bg-red-100 text-red-700",
     },
     stock_out: {
-      label: "เบิก/ตัดสต็อก",
+      label: "ขายสินค้า",
       color: "bg-red-100 text-red-700",
     },
     adjustment_in: {
@@ -183,7 +183,7 @@ export default function StockMovementsPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  async function loadMovements() {
+  const loadMovements = useCallback(async () => {
     setIsLoading(true);
     setErrorMessage("");
 
@@ -238,7 +238,7 @@ export default function StockMovementsPage() {
 
     setMovements(data || []);
     setIsLoading(false);
-  }
+  }, [endDate, startDate]);
 
   useEffect(() => {
     void loadMovements();
@@ -259,7 +259,7 @@ export default function StockMovementsPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [startDate, endDate]);
+  }, [loadMovements]);
 
   const employeeOptions = useMemo(() => {
     const employeeMap = new Map();
@@ -397,6 +397,12 @@ export default function StockMovementsPage() {
             icon={<FaShoppingCart />}
             text="เบิก/ตัดสต็อก"
             href="/sales"
+          />
+
+          <Menu
+            icon={<FaArrowUp />}
+            text="รับสินค้าเข้า"
+            href="/stock-in"
           />
 
           <Menu

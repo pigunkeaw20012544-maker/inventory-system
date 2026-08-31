@@ -11,6 +11,8 @@ import { supabase } from "../../lib/supabase";
 import {
   FaBars,
   FaArrowRight,
+  FaArrowUp,
+  FaBarcode,
   FaBox,
   FaBoxOpen,
   FaChartBar,
@@ -129,18 +131,21 @@ export default function UserDashboardPage() {
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("display_name")
+        .select("display_name, role, is_active")
         .eq("id", user.id)
         .maybeSingle();
 
-      if (profileError) {
-        throw profileError;
+      if (
+        profileError ||
+        !profile ||
+        profile.role !== "user" ||
+        profile.is_active !== true ||
+        !profile.display_name
+      ) {
+        throw profileError || new Error("ไม่พบข้อมูลผู้ใช้งานที่ถูกต้อง");
       }
 
-      const sellerNames = [
-        profile?.display_name,
-        "User",
-      ].filter(Boolean);
+      const sellerNames = [profile.display_name];
 
       const [
         { data: productData, error: productError },
@@ -352,9 +357,12 @@ export default function UserDashboardPage() {
             href="/user/products"
           />
 
+          <Menu icon={<FaBarcode />} text="สแกนบาร์โค้ด" href="/user/barcode" />
+          <Menu icon={<FaArrowUp />} text="รับสินค้าเข้า" href="/user/stock-in" />
+
           <Menu
             icon={<FaShoppingCart />}
-            text="การขาย"
+            text="ขายสินค้า"
             href="/user/sales"
           />
 

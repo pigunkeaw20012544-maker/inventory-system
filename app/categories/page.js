@@ -11,6 +11,7 @@ import { supabase } from "../lib/supabase";
 import {
   FaBox,
   FaBars,
+  FaArrowUp,
   FaChartBar,
   FaCheckCircle,
   FaEdit,
@@ -25,6 +26,8 @@ import {
   FaThLarge,
   FaTimes,
   FaTrash,
+  FaToggleOff,
+  FaToggleOn,
   FaUsers,
 } from "react-icons/fa";
 
@@ -99,7 +102,7 @@ export default function CategoriesPage() {
         id: category.id,
         name: category.name || "-",
         description: category.description || "",
-        isActive: category.is_active !== false,
+        isActive: category.is_active === true,
         totalProducts: productCount[String(category.id)] || 0,
       })
     );
@@ -209,6 +212,23 @@ export default function CategoriesPage() {
     }));
   }
 
+  async function hasDuplicateName(name, excludeId) {
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id, name")
+      .ilike("name", name);
+
+    if (error) {
+      throw new Error(error.message || "ตรวจสอบชื่อหมวดหมู่ไม่สำเร็จ");
+    }
+
+    return (data || []).some(
+      (category) =>
+        String(category.id) !== String(excludeId || "") &&
+        normalizeValue(category.name) === normalizeValue(name)
+    );
+  }
+
   async function handleSaveCategory(event) {
     event.preventDefault();
 
@@ -223,54 +243,95 @@ export default function CategoriesPage() {
     setIsSaving(true);
     setFormError("");
 
-    const payload = {
-      name,
-      description,
-      is_active: formData.is_active,
-    };
-
-    let response;
-
-    if (modalMode === "add") {
-      response = await supabase.from("categories").insert(payload);
-    } else {
-      response = await supabase
-        .from("categories")
-        .update(payload)
-        .eq("id", editingCategory.id);
-    }
-
-    setIsSaving(false);
-
-    if (response.error) {
-      console.error(response.error);
-
-      if (response.error.code === "23505") {
+    try {
+      if (
+        await hasDuplicateName(
+          name,
+          modalMode === "edit" ? editingCategory.id : undefined
+        )
+      ) {
         setFormError("ชื่อหมวดหมู่นี้มีอยู่ในระบบแล้ว");
-      } else {
-        setFormError(
-          response.error.message || "บันทึกหมวดหมู่ไม่สำเร็จ"
-        );
+        return;
       }
 
+      const payload = {
+        name,
+        description,
+        is_active: formData.is_active === true,
+      };
+
+      const response =
+        modalMode === "add"
+          ? await supabase.from("categories").insert(payload)
+          : await supabase
+              .from("categories")
+              .update(payload)
+              .eq("id", editingCategory.id);
+
+      if (response.error) {
+        if (response.error.code === "23505") {
+          setFormError("ชื่อหมวดหมู่นี้มีอยู่ในระบบแล้ว");
+        } else {
+          setFormError(
+            response.error.message || "บันทึกหมวดหมู่ไม่สำเร็จ"
+          );
+        }
+
+        return;
+      }
+
+      await loadCategories();
+      closeModal();
+
+      alert(
+        modalMode === "add"
+          ? "เพิ่มหมวดหมู่สำเร็จ"
+          : "แก้ไขหมวดหมู่สำเร็จ"
+      );
+    } catch (error) {
+      setFormError(error.message || "บันทึกหมวดหมู่ไม่สำเร็จ");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleToggleCategory(category) {
+    const nextIsActive = !category.isActive;
+    const actionLabel = nextIsActive ? "เปิดใช้งาน" : "ปิดใช้งาน";
+    const confirmed = window.confirm(
+      `ต้องการ${actionLabel}หมวดหมู่ "${category.name}" ใช่หรือไม่?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("categories")
+      .update({ is_active: nextIsActive })
+      .eq("id", category.id);
+
+    if (error) {
+      alert(error.message || `ไม่สามารถ${actionLabel}หมวดหมู่ได้`);
       return;
     }
 
-    await loadCategories();
-    closeModal();
-
-    alert(
-      modalMode === "add"
-        ? "เพิ่มหมวดหมู่สำเร็จ"
-        : "แก้ไขหมวดหมู่สำเร็จ"
+    setCategories((previous) =>
+      previous.map((item) =>
+        item.id === category.id ? { ...item, isActive: nextIsActive } : item
+      )
     );
+    alert(`${actionLabel}หมวดหมู่สำเร็จ`);
   }
 
   async function handleDeleteCategory(category) {
     if (category.totalProducts > 0) {
-      alert(
-        `ลบหมวดหมู่ "${category.name}" ไม่ได้ เพราะยังมีสินค้า ${category.totalProducts} รายการอยู่ในหมวดหมู่นี้`
-      );
+      if (category.isActive) {
+        await handleToggleCategory(category);
+      } else {
+        alert(
+          `หมวดหมู่นี้มีสินค้า ${category.totalProducts} รายการ และปิดใช้งานอยู่แล้ว`
+        );
+      }
+
       return;
     }
 
@@ -376,6 +437,8 @@ export default function CategoriesPage() {
             text="การขาย"
             href="/sales"
           />
+
+          <Menu icon={<FaArrowUp />} text="รับสินค้าเข้า" href="/stock-in" />
 
           <Menu
             icon={<FaHistory />}
@@ -619,8 +682,31 @@ export default function CategoriesPage() {
                             onClick={() => openEditModal(item)}
                             className="rounded-lg sm:rounded-xl border border-blue-200 bg-blue-50 p-2 sm:p-3 text-blue-600 hover:bg-blue-100 text-sm sm:text-base"
                             title="แก้ไข"
+                            aria-label="แก้ไขหมวดหมู่"
                           >
                             <FaEdit />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCategory(item)}
+                            className={`rounded-lg sm:rounded-xl border p-2 sm:p-3 text-sm sm:text-base ${
+                              item.isActive
+                                ? "border-orange-200 bg-orange-50 text-orange-600 hover:bg-orange-100"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100"
+                            }`}
+                            title={
+                              item.isActive
+                                ? "ปิดใช้งานหมวดหมู่"
+                                : "เปิดใช้งานหมวดหมู่"
+                            }
+                            aria-label={
+                              item.isActive
+                                ? "ปิดใช้งานหมวดหมู่"
+                                : "เปิดใช้งานหมวดหมู่"
+                            }
+                          >
+                            {item.isActive ? <FaToggleOn /> : <FaToggleOff />}
                           </button>
 
                           <button
@@ -633,8 +719,13 @@ export default function CategoriesPage() {
                             }`}
                             title={
                               item.totalProducts > 0
-                                ? "ไม่สามารถลบได้"
+                                ? "มีสินค้าอ้างอิง จึงปิดใช้งานแทนการลบ"
                                 : "ลบ"
+                            }
+                            aria-label={
+                              item.totalProducts > 0
+                                ? "ปิดใช้งานแทนการลบ"
+                                : "ลบหมวดหมู่"
                             }
                           >
                             <FaTrash />
@@ -669,6 +760,7 @@ export default function CategoriesPage() {
             <button
               type="button"
               onClick={closeModal}
+              disabled={isSaving}
               className="absolute right-4 sm:right-6 top-4 sm:top-6 rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600"
             >
               <FaTimes className="text-lg sm:text-xl" />
@@ -696,6 +788,7 @@ export default function CategoriesPage() {
               </label>
 
               <input
+                id="category-name"
                 name="name"
                 value={formData.name}
                 onChange={handleFormChange}
@@ -710,6 +803,7 @@ export default function CategoriesPage() {
               </label>
 
               <textarea
+                id="category-description"
                 name="description"
                 value={formData.description}
                 onChange={handleFormChange}
@@ -722,6 +816,8 @@ export default function CategoriesPage() {
             <label className="mt-5 sm:mt-6 flex cursor-pointer items-center gap-3 rounded-lg sm:rounded-xl border border-slate-200 bg-slate-50 px-3 sm:px-4 py-3 sm:py-4">
               <input
                 type="checkbox"
+                name="is_active"
+                id="category-is-active"
                 checked={formData.is_active}
                 onChange={(event) =>
                   setFormData((previous) => ({
@@ -747,6 +843,7 @@ export default function CategoriesPage() {
               <button
                 type="button"
                 onClick={closeModal}
+                disabled={isSaving}
                 className="rounded-lg sm:rounded-xl border border-slate-200 px-4 sm:px-5 py-2 sm:py-3 text-xs sm:text-base text-slate-700 hover:bg-slate-50"
               >
                 ยกเลิก
