@@ -402,15 +402,161 @@ export default function ProductsPage() {
     setFormData(emptyForm);
     setFormError("");
   }
+async function generateNextProductCode(categoryId) {
+  if (!categoryId) {
+    return "";
+  }
 
-  function handleFormChange(event) {
-    const { name, value } = event.target;
+  try {
+    const selectedCategory = categories.find(
+      (category) => String(category.id) === String(categoryId)
+    );
+
+    if (!selectedCategory) {
+      return "";
+    }
+
+    // ดึงสินค้าทั้งหมดในหมวดหมู่ที่เลือก
+    const { data, error } = await supabase
+      .from("products")
+      .select("product_code")
+      .eq("category_id", categoryId);
+
+    if (error) {
+      console.error("generate product code error:", error);
+      throw error;
+    }
+
+    const productCodes = (data || [])
+      .map((item) => String(item.product_code || "").trim().toUpperCase())
+      .filter(Boolean);
+
+    /*
+      ถ้ามีสินค้าเดิมในหมวดนี้
+      ให้ใช้ prefix จากรหัสสินค้าเดิมของหมวดนั้น
+
+      เช่น:
+      CUP-0001
+      CUP-0002
+
+      จะได้ prefix = CUP
+    */
+    let prefix = "";
+
+    for (const code of productCodes) {
+      const match = code.match(/^(.+?)[-_]?(\d+)$/);
+
+      if (match) {
+        prefix = match[1].replace(/[-_]$/, "");
+        break;
+      }
+    }
+
+    /*
+      กรณีหมวดหมู่นี้ยังไม่มีสินค้า
+      สร้าง prefix จากชื่อหมวดหมู่อัตโนมัติ
+
+      หมายเหตุ:
+      หากต้องการ prefix เฉพาะ เช่น
+      แก้ว = CUP
+      หลอด = STR
+      ฝา = LID
+      สามารถกำหนดเพิ่มภายหลังได้
+    */
+    if (!prefix) {
+      const categoryName = String(selectedCategory.name || "").trim();
+
+      const englishPrefix = categoryName
+        .replace(/[^A-Za-z0-9]/g, "")
+        .slice(0, 3)
+        .toUpperCase();
+
+      prefix =
+        englishPrefix ||
+        `CAT${String(categoryId).padStart(2, "0")}`;
+    }
+
+    let highestNumber = 0;
+    let digitLength = 4;
+
+    productCodes.forEach((code) => {
+      const match = code.match(/^(.+?)[-_]?(\d+)$/);
+
+      if (!match) {
+        return;
+      }
+
+      const codePrefix = match[1].replace(/[-_]$/, "");
+
+      if (codePrefix !== prefix) {
+        return;
+      }
+
+      const numberPart = match[2];
+      const number = Number(numberPart);
+
+      if (Number.isFinite(number)) {
+        highestNumber = Math.max(highestNumber, number);
+        digitLength = Math.max(digitLength, numberPart.length);
+      }
+    });
+
+    const nextNumber = highestNumber + 1;
+
+    return `${prefix}-${String(nextNumber).padStart(
+      digitLength,
+      "0"
+    )}`;
+  } catch (error) {
+    console.error(error);
+
+    return "";
+  }
+}
+  async function handleFormChange(event) {
+  const { name, value } = event.target;
+
+  // เมื่อเลือกหมวดหมู่ตอนเพิ่มสินค้า
+  // ให้สร้างรหัสสินค้าอัตโนมัติทันที
+  if (name === "category_id" && modalMode === "add") {
+    setFormError("");
+
+    // บันทึกหมวดหมู่และล้างรหัสเดิมก่อน
+    setFormData((previous) => ({
+      ...previous,
+      category_id: value,
+      product_code: "",
+    }));
+
+    if (!value) {
+      return;
+    }
+
+    const nextProductCode =
+      await generateNextProductCode(value);
+
+    if (!nextProductCode) {
+      setFormError(
+        "ไม่สามารถสร้างรหัสสินค้าอัตโนมัติได้ กรุณาเลือกหมวดหมู่อีกครั้ง"
+      );
+      return;
+    }
 
     setFormData((previous) => ({
       ...previous,
-      [name]: value,
+      category_id: value,
+      product_code: nextProductCode,
     }));
+
+    return;
   }
+
+  // ช่องอื่นทำงานเหมือนเดิม
+  setFormData((previous) => ({
+    ...previous,
+    [name]: value,
+  }));
+}
 
   async function findProductDuplicate(field, value, excludeId) {
     const { data, error } = await supabase
@@ -1270,13 +1416,39 @@ async function handleDeleteProduct(product) {
             )}
 
             <div className="mt-7 grid grid-cols-1 gap-5 md:grid-cols-2">
-              <InputField
-                label="รหัสสินค้า"
-                name="product_code"
-                value={formData.product_code}
-                onChange={handleFormChange}
-                placeholder="เช่น BEV-0009"
-              />
+              <div>
+  <label className="mb-2 block text-sm font-medium text-slate-700">
+    รหัสสินค้า
+  </label>
+
+  <input
+    type="text"
+    name="product_code"
+    value={
+      modalMode === "add"
+        ? formData.product_code ||
+          "เลือกหมวดหมู่เพื่อสร้างรหัสสินค้า"
+        : formData.product_code
+    }
+    onChange={
+      modalMode === "edit"
+        ? handleFormChange
+        : undefined
+    }
+    readOnly={modalMode === "add"}
+    className={`w-full rounded-xl border px-4 py-3 font-mono outline-none ${
+      modalMode === "add"
+        ? "cursor-default border-slate-200 bg-slate-100 text-slate-700"
+        : "border-slate-200 bg-white text-slate-800 focus:border-red-500"
+    }`}
+  />
+
+  {modalMode === "add" && (
+    <p className="mt-2 text-xs text-slate-500">
+      ระบบจะสร้างรหัสสินค้าต่อจากสินค้าล่าสุดในหมวดหมู่ที่เลือกให้อัตโนมัติ
+    </p>
+  )}
+</div>
 
              <div>
   <label className="mb-2 block text-sm font-medium text-slate-700">
